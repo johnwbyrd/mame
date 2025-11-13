@@ -1,7 +1,7 @@
 {
 	"plugin": {
 		"name": "semihost",
-		"description": "RIFF-based semihosting device",
+		"description": "Semihosting",
 		"version": "1.0.0",
 		"author": "MAME Team",
 		"type": "plugin",

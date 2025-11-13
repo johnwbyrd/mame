@@ -4,10 +4,11 @@
 
 local menu = {}
 
-function menu.create(semihost_state)
+function menu.create(semihost_state, save_callback)
 	local self = {
 		state = semihost_state,
-		editing = nil, -- {field, value}
+		save_callback = save_callback,
+		edit_sandbox_buffer = nil, -- nil when not editing, string when editing
 	}
 
 	-- Format address as hex string
@@ -29,35 +30,25 @@ function menu.create(semihost_state)
 		local items = {}
 
 		-- Header
-		table.insert(items, {_p('plugin-semihost', 'RIFF Semihosting Configuration'), '', 'off'})
+		table.insert(items, {_p('plugin-semihost', 'Semihosting Configuration'), '', 'off'})
 		table.insert(items, {'---', '', ''})
 
-		-- Enable/Disable
-		local enabled_str = self.state.enabled and _p('plugin-semihost', 'Enabled') or _p('plugin-semihost', 'Disabled')
-		table.insert(items, {
-			_p('plugin-semihost', 'Semihosting'),
-			enabled_str,
-			self.state.enabled and 'l' or 'r'
-		})
-
-		-- Base address
+		-- Base address - show left/right arrows
 		table.insert(items, {
 			_p('plugin-semihost', 'Base Address'),
 			format_addr(self.state.base_addr),
-			self.editing and self.editing.field == 'base_addr' and 'lr' or ''
+			'lr'
 		})
 
-		-- Trigger offset
-		table.insert(items, {
-			_p('plugin-semihost', 'Trigger Offset'),
-			format_addr(self.state.trigger_offset),
-			self.editing and self.editing.field == 'trigger_offset' and 'lr' or ''
-		})
-
-		-- Sandbox directory
-		local sandbox_display = self.state.sandbox_dir
-		if sandbox_display == '' then
-			sandbox_display = _p('plugin-semihost', '<none - unrestricted>')
+		-- Sandbox directory (editable)
+		local sandbox_display
+		if self.edit_sandbox_buffer then
+			sandbox_display = self.edit_sandbox_buffer .. '_'
+		else
+			sandbox_display = self.state.sandbox_dir
+			if sandbox_display == '' then
+				sandbox_display = _p('plugin-semihost', '<auto>')
+			end
 		end
 		table.insert(items, {
 			_p('plugin-semihost', 'Sandbox Directory'),
@@ -73,125 +64,135 @@ function menu.create(semihost_state)
 			self.state.logging and 'l' or 'r'
 		})
 
-		table.insert(items, {'---', '', ''})
-
-		-- Status info
-		if self.state.enabled and self.state.installed then
-			table.insert(items, {
-				_p('plugin-semihost', 'Status'),
-				_p('plugin-semihost', 'Active'),
-				'off'
-			})
-
-			if self.state.config then
-				local config = self.state.config
-				table.insert(items, {
-					_p('plugin-semihost', 'Word Size'),
-					string.format('%d bytes', config.word_size),
-					'off'
-				})
-				table.insert(items, {
-					_p('plugin-semihost', 'Pointer Size'),
-					string.format('%d bytes', config.ptr_size),
-					'off'
-				})
-
-				local endian_names = {[0] = 'Little', [1] = 'Big', [2] = 'PDP'}
-				table.insert(items, {
-					_p('plugin-semihost', 'Endianness'),
-					endian_names[config.endianness] or 'Unknown',
-					'off'
-				})
-			end
-		elseif self.state.enabled then
-			table.insert(items, {
-				_p('plugin-semihost', 'Status'),
-				_p('plugin-semihost', 'Waiting for machine start'),
-				'off'
-			})
-		else
-			table.insert(items, {
-				_p('plugin-semihost', 'Status'),
-				_p('plugin-semihost', 'Disabled'),
-				'off'
-			})
-		end
-
-		return items
+		return items, nil, 'lrrepeat' .. (self.edit_sandbox_buffer and ' ignorepause' or '')
 	end
 
 	-- Handle menu events
 	function self.handle(index, event)
-		-- Item indices (accounting for header and separator)
-		local ITEM_ENABLE = 3
-		local ITEM_BASE_ADDR = 4
-		local ITEM_TRIGGER_OFFSET = 5
-		local ITEM_SANDBOX = 6
-		local ITEM_LOGGING = 7
-
-		if index == ITEM_ENABLE then
-			if event == 'left' or event == 'right' then
-				self.state.enabled = not self.state.enabled
-				if self.state.enabled then
-					emu.print_info('[SEMIHOST] Enabled - will activate on next machine start')
-				else
-					emu.print_info('[SEMIHOST] Disabled')
-				end
-				return true
+		-- Character validation for text input
+		local function inputchar()
+			local ch = tonumber(event)
+			if not ch then
+				return nil
+			elseif (ch >= 0x100) or ((ch & 0x7f) >= 0x20) or (ch == 0x08) then
+				return utf8.char(ch)
+			else
+				return nil
 			end
-		elseif index == ITEM_BASE_ADDR then
-			if event == 'select' then
-				-- TODO: Text input for address
-				-- For now, cycle through some common addresses
-				local addrs_8bit = {0xFC00, 0xFD00, 0xFE00, 0xFF00}
-				local addrs_other = {0xFFFFFC00, 0xFFFFF000, 0xF0000000}
+		end
 
-				local addr_space = manager.machine.devices[':maincpu'].spaces['program']
-				local addr_bits = addr_space.addr_width
+		-- Item indices (accounting for header and separator)
+		local ITEM_BASE_ADDR = 3
+		local ITEM_SANDBOX = 4
+		local ITEM_LOGGING = 5
 
-				local addrs = (addr_bits <= 16) and addrs_8bit or addrs_other
-				local found = false
+		if index == ITEM_BASE_ADDR then
+			if event == 'left' or event == 'right' or event == 'select' then
+				-- Determine address space width
+				local addr_bits = 32 -- default
 
-				for i, addr in ipairs(addrs) do
-					if self.state.base_addr == addr then
-						self.state.base_addr = addrs[(i % #addrs) + 1]
-						found = true
-						break
+				if manager and manager.machine and manager.machine.devices and manager.machine.devices[':maincpu'] then
+					local cpu = manager.machine.devices[':maincpu']
+					if cpu and cpu.spaces and cpu.spaces['program'] then
+						addr_bits = cpu.spaces['program'].addr_width
 					end
 				end
 
-				if not found then
-					self.state.base_addr = addrs[1]
+				-- Calculate current number of zero bits
+				local current_zeros = 0
+				local test_addr = self.state.base_addr
+				while current_zeros < addr_bits and (test_addr & 1) == 0 do
+					current_zeros = current_zeros + 1
+					test_addr = test_addr >> 1
+				end
+
+				-- Adjust based on direction
+				if event == 'left' then
+					current_zeros = current_zeros - 1
+					if current_zeros < 0 then
+						current_zeros = addr_bits
+					end
+				else -- right or select
+					current_zeros = current_zeros + 1
+					if current_zeros > addr_bits then
+						current_zeros = 0
+					end
+				end
+
+				-- Build address: all 1s followed by zeros
+				if current_zeros == addr_bits then
+					self.state.base_addr = 0
+				else
+					-- Create mask of all 1s in the address space
+					local all_ones = (1 << addr_bits) - 1
+					-- Shift left by number of zeros to get 1s followed by 0s
+					self.state.base_addr = (all_ones << current_zeros) & all_ones
 				end
 
 				emu.print_info(string.format('[SEMIHOST] Base address changed to %s', format_addr(self.state.base_addr)))
+				if self.save_callback then
+					self.save_callback()
+				end
 				return true
 			end
-		elseif index == ITEM_TRIGGER_OFFSET then
-			if event == 'select' then
-				-- Cycle through common trigger offsets
-				local offsets = {0x1000, 0x2000, 0x0100, 0x0200}
-				local found = false
-
-				for i, offset in ipairs(offsets) do
-					if self.state.trigger_offset == offset then
-						self.state.trigger_offset = offsets[(i % #offsets) + 1]
-						found = true
-						break
+		elseif index == ITEM_SANDBOX then
+			-- Handle sandbox directory text editing
+			if self.edit_sandbox_buffer then
+				-- Already editing
+				if event == 'select' then
+					-- Save
+					self.state.sandbox_dir = self.edit_sandbox_buffer
+					self.edit_sandbox_buffer = nil
+					emu.print_info(string.format('[SEMIHOST] Sandbox directory set to: %s', self.state.sandbox_dir))
+					if self.save_callback then
+						self.save_callback()
+					end
+					return true
+				elseif event == 'back' then
+					-- Swallow back key to prevent menu exit while editing
+					return true
+				elseif event == 'cancel' then
+					-- Cancel editing
+					self.edit_sandbox_buffer = nil
+					return true
+				else
+					local char = inputchar()
+					if char == '\b' then
+						-- Backspace (UTF-8 safe)
+						self.edit_sandbox_buffer = self.edit_sandbox_buffer:gsub('[%z\1-\127\192-\255][\128-\191]*$', '')
+						return true
+					elseif char then
+						-- Add character
+						self.edit_sandbox_buffer = self.edit_sandbox_buffer .. char
+						return true
 					end
 				end
-
-				if not found then
-					self.state.trigger_offset = offsets[1]
+			else
+				-- Not editing yet
+				if event == 'select' then
+					-- Start editing with current value
+					self.edit_sandbox_buffer = self.state.sandbox_dir
+					return true
+				else
+					local char = inputchar()
+					if char == '\b' then
+						-- Start editing with empty string
+						self.edit_sandbox_buffer = ''
+						return true
+					elseif char then
+						-- Start editing with this character
+						self.edit_sandbox_buffer = char
+						return true
+					end
 				end
-
-				emu.print_info(string.format('[SEMIHOST] Trigger offset changed to %s', format_addr(self.state.trigger_offset)))
-				return true
 			end
 		elseif index == ITEM_LOGGING then
 			if event == 'left' or event == 'right' then
 				self.state.logging = not self.state.logging
 				emu.print_info(string.format('[SEMIHOST] Verbose logging %s', self.state.logging and 'enabled' or 'disabled'))
+				if self.save_callback then
+					self.save_callback()
+				end
 				return true
 			end
 		end

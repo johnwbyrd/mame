@@ -15,14 +15,13 @@ local semihost = exports
 local riff = require('semihost/riff_parser')
 local syscalls_module = require('semihost/syscalls')
 local menu_module = require('semihost/menu')
+local persist = require('semihost/persist')
 
 local reset_subscription, stop_subscription, frame_subscription
 
 -- Plugin state
 local state = {
-	enabled = false,
 	base_addr = 0xFFFFFC00,
-	trigger_offset = 0x1000,
 	sandbox_dir = '',
 	logging = false,
 	installed = false,
@@ -153,14 +152,19 @@ local function install_semihost()
 		return
 	end
 
+	-- Check if machine is available
+	if not manager.machine or not manager.machine.devices then
+		return
+	end
+
 	local cpu = manager.machine.devices[':maincpu']
 	if not cpu then
-		emu.print_error('[SEMIHOST] No main CPU found')
+		-- CPU not available yet, will retry on next reset/frame
 		return
 	end
 
 	if not cpu.spaces or not cpu.spaces['program'] then
-		emu.print_error('[SEMIHOST] Main CPU has no program space')
+		emu.print_warning('[SEMIHOST] Main CPU has no program space')
 		return
 	end
 
@@ -171,10 +175,7 @@ local function install_semihost()
 		state.base_addr = get_default_base_addr()
 	end
 
-	local trigger_addr = state.base_addr + state.trigger_offset
-
-	emu.print_info(string.format('[SEMIHOST] Installing at base=0x%X, trigger=0x%X',
-		state.base_addr, trigger_addr))
+	emu.print_info(string.format('[SEMIHOST] Installing at base=0x%X', state.base_addr))
 
 	-- Install write tap on trigger address
 	-- Note: MAME Lua doesn't have direct write tap support, so we'll use periodic checking
@@ -220,17 +221,18 @@ local function uninstall_semihost()
 	state.syscalls = nil
 end
 
--- Check trigger address for writes
+-- Check for semihosting requests
 local function check_trigger()
-	if not state.enabled or not state.installed or not state.memory then
+	-- Try to install if not already installed
+	if not state.installed then
+		install_semihost()
+	end
+
+	if not state.installed or not state.memory then
 		return
 	end
 
-	local trigger_addr = state.base_addr + state.trigger_offset
-
-	-- Read trigger byte to check if it's been written
-	-- In a real implementation, we'd use a write tap, but Lua doesn't expose that
-	-- So we check if there's a valid RIFF structure at base_addr
+	-- Check if there's a valid RIFF structure at base_addr
 	local bytes = read_memory_bytes(state.memory, state.base_addr, 12)
 
 	-- Check for RIFF signature
@@ -244,12 +246,40 @@ local function check_trigger()
 	end
 end
 
+-- Load configuration on machine start
+local function load_config()
+	local config = persist:load_config()
+
+	-- Apply loaded config to state
+	if config.base_addr then
+		state.base_addr = config.base_addr
+	end
+	state.sandbox_dir = config.sandbox_dir
+	state.logging = config.logging
+
+	if state.logging then
+		emu.print_verbose('[SEMIHOST] Loaded configuration from disk')
+	end
+end
+
+-- Save configuration when machine stops
+local function save_config()
+	if persist:save_config(state) then
+		if state.logging then
+			emu.print_verbose('[SEMIHOST] Saved configuration to disk')
+		end
+	end
+end
+
 -- Start plugin
 function semihost.startplugin()
 	emu.print_info('[SEMIHOST] Plugin loaded')
 
-	-- Create menu handler
-	state.menu = menu_module.create(state)
+	-- Load saved configuration
+	load_config()
+
+	-- Create menu handler with save callback
+	state.menu = menu_module.create(state, save_config)
 
 	-- Register menu
 	emu.register_menu(
@@ -262,16 +292,15 @@ function semihost.startplugin()
 		_p('plugin-semihost', 'Semihosting')
 	)
 
-	-- Machine reset: install semihosting if enabled
+	-- Machine reset: install semihosting (plugin is enabled if we're running)
 	reset_subscription = emu.add_machine_reset_notifier(function()
-		if state.enabled then
-			install_semihost()
-		end
+		install_semihost()
 	end)
 
-	-- Machine stop: cleanup
+	-- Machine stop: cleanup and save config
 	stop_subscription = emu.add_machine_stop_notifier(function()
 		uninstall_semihost()
+		save_config()
 	end)
 
 	-- Frame callback: check for semihosting requests
