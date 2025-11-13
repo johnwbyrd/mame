@@ -44061,6 +44061,9 @@ sbrain
 sagafox
 sagafoxf80
 
+@source:skeleton/sbc6502.cpp
+sbc6502
+
 @source:skeleton/scopus.cpp
 sagitta180
 
