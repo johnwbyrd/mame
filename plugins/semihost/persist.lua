@@ -2,6 +2,7 @@
 -- copyright-holders:MAME Team
 -- Persistence module for semihosting plugin
 
+local config_module = require('semihost/config')
 local lib = {}
 
 -- Get plugin configuration directory path
@@ -16,71 +17,66 @@ local function get_config_filename()
 end
 
 -- Load plugin configuration
-function lib:load_config()
-	local config = {
-		base_addr = nil,  -- Will use auto-detect if nil
-		sandbox_dir = '', -- Empty means auto
-		logging = false
-	}
-
+-- Returns: config object, error message (or nil on success)
+function lib.load_config(logger)
 	local json = require('json')
 	local filename = get_config_path() .. '/' .. get_config_filename()
 	local file = io.open(filename, 'r')
 
 	if not file then
 		-- No saved config, return defaults
-		return config
+		logger.verbose('No saved configuration found, using defaults')
+		return config_module.create_default(), nil
 	end
 
-	local loaded = json.parse(file:read('a'))
+	local content = file:read('a')
 	file:close()
 
+	local loaded = json.parse(content)
 	if not loaded then
-		emu.print_error(string.format('[SEMIHOST] Error parsing config file "%s" as JSON', filename))
-		return config
+		local err = string.format('Error parsing config file "%s" as JSON', filename)
+		logger.error(err)
+		return config_module.create_default(), err
 	end
 
-	-- Merge loaded settings with defaults
-	if loaded.base_addr ~= nil then
-		config.base_addr = loaded.base_addr
-	end
-	if loaded.sandbox_dir ~= nil then
-		config.sandbox_dir = loaded.sandbox_dir
-	end
-	if loaded.logging ~= nil then
-		config.logging = loaded.logging
+	logger.verbose('Configuration loaded from %s', filename)
+
+	-- Create config from persisted data with validation
+	local config, err = config_module.from_persistable(loaded)
+	if err then
+		logger.error('Error validating loaded config: %s', err)
+		return config_module.create_default(), err
 	end
 
-	return config
+	return config, nil
 end
 
 -- Save plugin configuration
-function lib:save_config(state)
+-- Returns: success (boolean), error message (or nil on success)
+function lib.save_config(config, logger)
 	local path = get_config_path()
 	local lfs = require('lfs')
 	local attr = lfs.attributes(path)
 
 	-- Check if path exists but is not a directory
 	if attr and (attr.mode ~= 'directory') then
-		emu.print_error(string.format('[SEMIHOST] Cannot save config: "%s" is not a directory', path))
-		return false
+		local err = string.format('Cannot save config: "%s" is not a directory', path)
+		logger.error(err)
+		return false, err
 	end
 
 	-- Create directory if it doesn't exist
 	if not attr then
 		local success, err = lfs.mkdir(path)
 		if not success then
-			emu.print_error(string.format('[SEMIHOST] Cannot create config directory: %s', err or 'unknown error'))
-			return false
+			local err_msg = string.format('Cannot create config directory: %s', err or 'unknown error')
+			logger.error(err_msg)
+			return false, err_msg
 		end
 	end
 
-	-- Prepare settings to save
-	local settings = {
-		base_addr = state.base_addr,
-		sandbox_dir = state.sandbox_dir,
-		logging = state.logging
-	}
+	-- Convert config to persistable format
+	local settings = config_module.to_persistable(config)
 
 	-- Serialize to JSON
 	local json = require('json')
@@ -90,14 +86,16 @@ function lib:save_config(state)
 	local filename = path .. '/' .. get_config_filename()
 	local file = io.open(filename, 'w')
 	if not file then
-		emu.print_error(string.format('[SEMIHOST] Cannot open config file for writing: %s', filename))
-		return false
+		local err = string.format('Cannot open config file for writing: %s', filename)
+		logger.error(err)
+		return false, err
 	end
 
 	file:write(data)
 	file:close()
 
-	return true
+	logger.verbose('Configuration saved to %s', filename)
+	return true, nil
 end
 
 return lib

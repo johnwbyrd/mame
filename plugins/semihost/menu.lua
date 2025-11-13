@@ -2,12 +2,19 @@
 -- copyright-holders:MAME Team
 -- Configuration menu for semihosting plugin
 
+local constants = require('semihost/constants')
+local config_module = require('semihost/config')
 local menu = {}
 
-function menu.create(semihost_state, save_callback)
+-- Create menu handler
+-- config: current configuration object (immutable)
+-- logger: logger instance
+-- on_config_change: callback(new_config) called when configuration should be updated
+function menu.create(config, logger, on_config_change)
 	local self = {
-		state = semihost_state,
-		save_callback = save_callback,
+		config = config,
+		logger = logger,
+		on_config_change = on_config_change,
 		edit_sandbox_buffer = nil, -- nil when not editing, string when editing
 	}
 
@@ -16,13 +23,9 @@ function menu.create(semihost_state, save_callback)
 		return string.format("0x%X", addr)
 	end
 
-	-- Parse hex address string
-	local function parse_addr(str)
-		local num = tonumber(str, 16)
-		if not num then
-			num = tonumber(str, 10)
-		end
-		return num
+	-- Update configuration (called by parent)
+	function self.update_config(new_config)
+		self.config = new_config
 	end
 
 	-- Populate menu items
@@ -36,7 +39,7 @@ function menu.create(semihost_state, save_callback)
 		-- Base address - show left/right arrows
 		table.insert(items, {
 			_p('plugin-semihost', 'Base Address'),
-			format_addr(self.state.base_addr),
+			format_addr(self.config.base_addr),
 			'lr'
 		})
 
@@ -45,7 +48,7 @@ function menu.create(semihost_state, save_callback)
 		if self.edit_sandbox_buffer then
 			sandbox_display = self.edit_sandbox_buffer .. '_'
 		else
-			sandbox_display = self.state.sandbox_dir
+			sandbox_display = self.config.sandbox_dir
 			if sandbox_display == '' then
 				sandbox_display = _p('plugin-semihost', '<auto>')
 			end
@@ -57,11 +60,11 @@ function menu.create(semihost_state, save_callback)
 		})
 
 		-- Logging
-		local log_str = self.state.logging and _p('plugin-semihost', 'On') or _p('plugin-semihost', 'Off')
+		local log_str = self.config.logging_enabled and _p('plugin-semihost', 'On') or _p('plugin-semihost', 'Off')
 		table.insert(items, {
 			_p('plugin-semihost', 'Verbose Logging'),
 			log_str,
-			self.state.logging and 'l' or 'r'
+			self.config.logging_enabled and 'l' or 'r'
 		})
 
 		return items, nil, 'lrrepeat' .. (self.edit_sandbox_buffer and ' ignorepause' or '')
@@ -100,7 +103,7 @@ function menu.create(semihost_state, save_callback)
 
 				-- Calculate current number of zero bits
 				local current_zeros = 0
-				local test_addr = self.state.base_addr
+				local test_addr = self.config.base_addr
 				while current_zeros < addr_bits and (test_addr & 1) == 0 do
 					current_zeros = current_zeros + 1
 					test_addr = test_addr >> 1
@@ -120,18 +123,21 @@ function menu.create(semihost_state, save_callback)
 				end
 
 				-- Build address: all 1s followed by zeros
+				local new_base_addr
 				if current_zeros == addr_bits then
-					self.state.base_addr = 0
+					new_base_addr = 0
 				else
 					-- Create mask of all 1s in the address space
 					local all_ones = (1 << addr_bits) - 1
 					-- Shift left by number of zeros to get 1s followed by 0s
-					self.state.base_addr = (all_ones << current_zeros) & all_ones
+					new_base_addr = (all_ones << current_zeros) & all_ones
 				end
 
-				emu.print_info(string.format('[SEMIHOST] Base address changed to %s', format_addr(self.state.base_addr)))
-				if self.save_callback then
-					self.save_callback()
+				self.logger.info('Base address changed to %s', format_addr(new_base_addr))
+
+				-- Notify parent of configuration change
+				if self.on_config_change then
+					self.on_config_change({base_addr = new_base_addr})
 				end
 				return true
 			end
@@ -141,11 +147,13 @@ function menu.create(semihost_state, save_callback)
 				-- Already editing
 				if event == 'select' then
 					-- Save
-					self.state.sandbox_dir = self.edit_sandbox_buffer
+					local new_sandbox_dir = self.edit_sandbox_buffer
 					self.edit_sandbox_buffer = nil
-					emu.print_info(string.format('[SEMIHOST] Sandbox directory set to: %s', self.state.sandbox_dir))
-					if self.save_callback then
-						self.save_callback()
+					self.logger.info('Sandbox directory set to: %s', new_sandbox_dir)
+
+					-- Notify parent of configuration change
+					if self.on_config_change then
+						self.on_config_change({sandbox_dir = new_sandbox_dir})
 					end
 					return true
 				elseif event == 'back' then
@@ -171,7 +179,7 @@ function menu.create(semihost_state, save_callback)
 				-- Not editing yet
 				if event == 'select' then
 					-- Start editing with current value
-					self.edit_sandbox_buffer = self.state.sandbox_dir
+					self.edit_sandbox_buffer = self.config.sandbox_dir
 					return true
 				else
 					local char = inputchar()
@@ -188,11 +196,20 @@ function menu.create(semihost_state, save_callback)
 			end
 		elseif index == ITEM_LOGGING then
 			if event == 'left' or event == 'right' then
-				self.state.logging = not self.state.logging
-				emu.print_info(string.format('[SEMIHOST] Verbose logging %s', self.state.logging and 'enabled' or 'disabled'))
-				if self.save_callback then
-					self.save_callback()
+				local new_logging = not self.config.logging_enabled
+
+				-- Update our config immediately so populate() sees the new value
+				local new_config, err = config_module.update(self.config, {logging_enabled = new_logging})
+				if new_config then
+					self.config = new_config
 				end
+
+				-- Notify parent of configuration change to update logger and save
+				if self.on_config_change then
+					self.on_config_change({logging_enabled = new_logging})
+				end
+
+				self.logger.verbose('Verbose logging %s', new_logging and 'enabled' or 'disabled')
 				return true
 			end
 		end
