@@ -336,7 +336,7 @@ void sbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::sbc(machine_config &c
 DEFINE_SBC(m6502_device, 6502, "MOS 6502")
 DEFINE_SBC(z80_device, z80, "Z80")
 DEFINE_SBC(m68000_device, 68000, "Motorola 68000")
-DEFINE_SBC(arm7_device, arm7, "ARM7")
+DEFINE_SBC(arm7_cpu_device, arm7, "ARM7")
 DEFINE_SBC(i386_device, i386, "Intel 80386")
 DEFINE_SBC(r3000a_device, mips, "MIPS R3000A")
 
