@@ -97,7 +97,10 @@ function menu.create(config, logger, on_config_change)
 				if manager and manager.machine and manager.machine.devices and manager.machine.devices[':maincpu'] then
 					local cpu = manager.machine.devices[':maincpu']
 					if cpu and cpu.spaces and cpu.spaces['program'] then
-						addr_bits = cpu.spaces['program'].addr_width
+						local width = cpu.spaces['program'].addr_width
+						if width then
+							addr_bits = width
+						end
 					end
 				end
 
