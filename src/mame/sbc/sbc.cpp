@@ -249,6 +249,19 @@ void sbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
 	center_line("github.com/johnwbyrd/semihost");
 	center_line("");
 
+	// Display memory configuration
+	char addr_buf[64];
+	uint32_t vram_addr = get_vram_addr();
+
+	snprintf(addr_buf, sizeof(addr_buf), "Load address: 0x%X", LOAD_ADDR);
+	center_line(addr_buf);
+
+	snprintf(addr_buf, sizeof(addr_buf), "Video RAM: 0x%X-0x%X",
+	         vram_addr, vram_addr + 0x1FF);
+	center_line(addr_buf);
+
+	center_line("");
+
 	print_sentence("This is a minimal system with RAM and a "
 	               "MC6847 video display. "
 	               "Load a headerless binary in MAME using the -quik option. "
@@ -271,6 +284,18 @@ void sbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_start() {
 template <typename CPU_TYPE, uint32_t LOAD_ADDR>
 void init_cpu_for_idle(address_space &space) {
 	// Default: no special initialization needed
+}
+
+// 6502 specialization
+template <> void init_cpu_for_idle<m6502_device, 0x0200>(address_space &space) {
+	// Reset vector: points to 0x0200
+	space.write_byte(0xfffc, 0x00);
+	space.write_byte(0xfffd, 0x02);
+
+	// Idle loop: JMP to self
+	space.write_byte(0x0200, 0x4c); // JMP opcode
+	space.write_byte(0x0201, 0x00);
+	space.write_byte(0x0202, 0x02);
 }
 
 // Z80 specialization
@@ -339,13 +364,6 @@ sbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::quickload_cb(
 	address_space &space = m_maincpu->space(AS_PROGRAM);
 	for (uint32_t i = 0; i < size; i++)
 		space.write_byte(LOAD_ADDR + i, program[i]);
-
-	// Set reset vector for CPUs that use them
-	uint32_t ram_size = get_ram_size();
-	if (ram_size >= 0x10000) {
-		space.write_byte(0xfffc, LOAD_ADDR & 0xff);
-		space.write_byte(0xfffd, (LOAD_ADDR >> 8) & 0xff);
-	}
 
 	init_screen();
 
