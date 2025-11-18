@@ -506,6 +506,31 @@ class sbc_state : public driver_device {
 		return reserved_start - vram_size;
 	}
 
+	// Format RAM size in human-readable format (e.g., "4 GB", "16 KB")
+	std::string format_ram_size(uint64_t bytes) const {
+		const uint64_t KB = 1024;
+		const uint64_t MB = KB * 1024;
+		const uint64_t GB = MB * 1024;
+
+		char buf[32];
+		if (bytes >= GB) {
+			// Round to nearest GB: add GB/2 before dividing
+			uint64_t rounded = (bytes + (GB / 2)) / GB;
+			snprintf(buf, sizeof(buf), "%llu GB", (unsigned long long)rounded);
+		} else if (bytes >= MB) {
+			// Round to nearest MB
+			uint64_t rounded = (bytes + (MB / 2)) / MB;
+			snprintf(buf, sizeof(buf), "%llu MB", (unsigned long long)rounded);
+		} else if (bytes >= KB) {
+			// Round to nearest KB
+			uint64_t rounded = (bytes + (KB / 2)) / KB;
+			snprintf(buf, sizeof(buf), "%llu KB", (unsigned long long)rounded);
+		} else {
+			snprintf(buf, sizeof(buf), "%llu bytes", (unsigned long long)bytes);
+		}
+		return std::string(buf);
+	}
+
 	int m_cursor_pos;
 	static constexpr int LINE_WIDTH = 32;
 	static constexpr int SCREEN_HEIGHT = 16;
@@ -705,6 +730,8 @@ void sbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
 
 	// Display memory configuration
 	char addr_buf[64];
+	const uint32_t semihost_size = 1024;
+	const uint32_t vram_size = 512;
 	uint64_t semihost_addr = get_semihost_addr();
 	uint64_t vram_addr = get_vram_addr();
 	uint64_t available_ram = semihost_addr - LOAD_ADDR;
@@ -717,20 +744,22 @@ void sbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
 	center_line(addr_buf);
 
 	snprintf(addr_buf, sizeof(addr_buf), "Semihost: 0x%llX-0x%llX",
-	         (unsigned long long)semihost_addr, (unsigned long long)(semihost_addr + 0x3FF));
+	         (unsigned long long)semihost_addr, (unsigned long long)(semihost_addr + semihost_size - 1));
 	center_line(addr_buf);
 
 	snprintf(addr_buf, sizeof(addr_buf), "Video RAM: 0x%llX-0x%llX",
-	         (unsigned long long)vram_addr, (unsigned long long)(vram_addr + 0x1FF));
+	         (unsigned long long)vram_addr, (unsigned long long)(vram_addr + vram_size - 1));
 	center_line(addr_buf);
 
 	center_line("");
 
-	print_sentence("This is a minimal system with RAM and a "
-	               "MC6847 video display. "
-	               "Load a headerless binary in MAME using the -quik option. "
-	               "The program will be loaded and executed. "
-	               "Happy coding!");
+	std::string ram_size_str = format_ram_size(available_ram);
+	std::string intro = "This system has " + ram_size_str +
+	                    " of RAM and a MC6847 video display. "
+	                    "Load and execute a headerless binary in MAME "
+						"by using the -quik option. "
+	                    "Happy coding!";
+	print_sentence(intro.c_str());
 }
 
 template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
