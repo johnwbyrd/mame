@@ -53,6 +53,7 @@ private:
 	void listclones(const std::vector<std::string> &args);
 	void listbrothers(const std::vector<std::string> &args);
 	void listcrc(const std::vector<std::string> &args);
+	void listcpu(const std::vector<std::string> &args);
 	void listroms(const std::vector<std::string> &args);
 	void listbios(const std::vector<std::string> &args);
 	void listsamples(const std::vector<std::string> &args);

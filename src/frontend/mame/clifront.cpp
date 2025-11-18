@@ -72,6 +72,7 @@
 #define CLICOMMAND_VERIFYROMS           "verifyroms"
 #define CLICOMMAND_VERIFYSAMPLES        "verifysamples"
 #define CLICOMMAND_ROMIDENT             "romident"
+#define CLICOMMAND_LISTCPU              "listcpu"
 #define CLICOMMAND_LISTDEVICES          "listdevices"
 #define CLICOMMAND_LISTSLOTS            "listslots"
 #define CLICOMMAND_LISTMEDIA            "listmedia"
@@ -112,6 +113,7 @@ const options_entry cli_option_entries[] =
 	{ CLICOMMAND_LISTCLONES     ";lc",      "0",       core_options::option_type::COMMAND,    "show clones" },
 	{ CLICOMMAND_LISTBROTHERS   ";lb",      "0",       core_options::option_type::COMMAND,    "show \"brothers\", or other drivers from same sourcefile" },
 	{ CLICOMMAND_LISTCRC,                   "0",       core_options::option_type::COMMAND,    "CRC-32s" },
+	{ CLICOMMAND_LISTCPU,                   "0",       core_options::option_type::COMMAND,    "list CPU devices" },
 	{ CLICOMMAND_LISTROMS       ";lr",      "0",       core_options::option_type::COMMAND,    "list required ROMs for a driver" },
 	{ CLICOMMAND_LISTSAMPLES,               "0",       core_options::option_type::COMMAND,    "list optional samples for a driver" },
 	{ CLICOMMAND_VERIFYROMS,                "0",       core_options::option_type::COMMAND,    "report romsets that have problems" },
@@ -415,6 +417,41 @@ void cli_frontend::listsource(const std::vector<std::string> &args)
 			{ list_system_source(drivlist.driver().type); },
 			[&list_system_source] (device_type type, bool first)
 			{ list_system_source(type); });
+}
+
+
+//-------------------------------------------------
+//  listcpu - output the list of CPU devices
+//-------------------------------------------------
+
+void cli_frontend::listcpu(const std::vector<std::string> &args)
+{
+	// Collect all CPUs first for sorting
+	std::vector<std::pair<std::string, std::string>> cpus;
+
+	apply_device_action(
+			args,
+			[&cpus](device_t &device, const char *type, bool first)
+			{
+				// Check if device has execute interface (is a CPU)
+				device_execute_interface *exec = nullptr;
+				if (device.interface(exec))
+				{
+					cpus.emplace_back(device.shortname(), device.name());
+				}
+			});
+
+	// Sort by shortname
+	std::sort(cpus.begin(), cpus.end(),
+			[](const auto &a, const auto &b) { return a.first < b.first; });
+
+	// Output sorted list
+	if (!cpus.empty())
+	{
+		osd_printf_info("Name:             Description:\n");
+		for (const auto &cpu : cpus)
+			osd_printf_info("%-17s \"%s\"\n", cpu.first.c_str(), cpu.second.c_str());
+	}
 }
 
 
@@ -1691,6 +1728,7 @@ const cli_frontend::info_command_struct *cli_frontend::find_command(const std::s
 		{ CLICOMMAND_LISTCLONES,        0,  1, &cli_frontend::listclones,       "[system name]" },
 		{ CLICOMMAND_LISTBROTHERS,      0,  1, &cli_frontend::listbrothers,     "[system name]" },
 		{ CLICOMMAND_LISTCRC,           0, -1, &cli_frontend::listcrc,          "[system name]" },
+		{ CLICOMMAND_LISTCPU,           0, -1, &cli_frontend::listcpu,          "[pattern] ..." },
 		{ CLICOMMAND_LISTDEVICES,       0,  1, &cli_frontend::listdevices,      "[system name]" },
 		{ CLICOMMAND_LISTSLOTS,         0,  1, &cli_frontend::listslots,        "[system name]" },
 		{ CLICOMMAND_LISTBIOS,          0,  1, &cli_frontend::listbios,         "[system name]" },
