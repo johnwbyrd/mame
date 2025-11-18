@@ -44,6 +44,11 @@
 #include <cctype>
 #include <cstdio>
 #include <iostream>
+#include <cstdlib>
+
+#if defined(__GNUC__) || defined(__clang__)
+#include <cxxabi.h>
+#endif
 
 
 //**************************************************************************
@@ -427,7 +432,8 @@ void cli_frontend::listsource(const std::vector<std::string> &args)
 void cli_frontend::listcpu(const std::vector<std::string> &args)
 {
 	// Collect all CPUs first for sorting
-	std::vector<std::pair<std::string, std::string>> cpus;
+	// tuple: shortname, C++ class name, fullname
+	std::vector<std::tuple<std::string, std::string, std::string>> cpus;
 
 	apply_device_action(
 			args,
@@ -437,20 +443,46 @@ void cli_frontend::listcpu(const std::vector<std::string> &args)
 				device_execute_interface *exec = nullptr;
 				if (device.interface(exec))
 				{
-					cpus.emplace_back(device.shortname(), device.name());
+					// Get the C++ class name from type_info and demangle it
+					const char *mangled = device.type().type().name();
+					std::string class_name;
+
+#if defined(__GNUC__) || defined(__clang__)
+					// GCC/Clang: use abi::__cxa_demangle
+					int status = 0;
+					char *demangled = abi::__cxa_demangle(mangled, nullptr, nullptr, &status);
+					class_name = (status == 0 && demangled) ? demangled : mangled;
+					if (demangled)
+						std::free(demangled);
+#else
+					// MSVC or other compilers: use mangled name as-is
+					// MSVC mangled names are often readable enough (e.g., "class pentium_device")
+					class_name = mangled;
+
+					// Strip common MSVC prefixes for better readability
+					if (class_name.compare(0, 6, "class ") == 0)
+						class_name = class_name.substr(6);
+					else if (class_name.compare(0, 7, "struct ") == 0)
+						class_name = class_name.substr(7);
+#endif
+
+					cpus.emplace_back(device.shortname(), class_name, device.name());
 				}
 			});
 
 	// Sort by shortname
 	std::sort(cpus.begin(), cpus.end(),
-			[](const auto &a, const auto &b) { return a.first < b.first; });
+			[](const auto &a, const auto &b) { return std::get<0>(a) < std::get<0>(b); });
 
 	// Output sorted list
 	if (!cpus.empty())
 	{
-		osd_printf_info("Name:             Description:\n");
+		osd_printf_info("Short name:       Device name:                  Full name:\n");
 		for (const auto &cpu : cpus)
-			osd_printf_info("%-17s \"%s\"\n", cpu.first.c_str(), cpu.second.c_str());
+			osd_printf_info("%-17s %-29s \"%s\"\n",
+				std::get<0>(cpu).c_str(),
+				std::get<1>(cpu).c_str(),
+				std::get<2>(cpu).c_str());
 	}
 }
 
