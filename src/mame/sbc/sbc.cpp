@@ -1021,14 +1021,16 @@ DEFINE_SBC(xavix2_device, XAVIX2, xavix2, "SSD XaviX 2")
 DEFINE_SBC(xavix2000_device, XAVIX2000, xavix2000, "SSD XaviX 2000")
 
 // Motorola 6800 family
-DEFINE_SBC(m6801_cpu_device, M6801, m6801, "Motorola 6801")
+// M6801 requires ROM region (2KB mask ROM) - use ROMless M6803 instead
+// DEFINE_SBC(m6801_cpu_device, M6801, m6801, "Motorola 6801") // Requires ROM region - use M6803
 DEFINE_SBC(m6802_cpu_device, M6802, m6802, "Motorola 6802")
 DEFINE_SBC(m6803_cpu_device, M6803, m6803, "Motorola 6803")
 DEFINE_SBC(m6808_cpu_device, M6808, m6808, "Motorola 6808")
 // HD6301 generic doesn't exist - using specific variants
-DEFINE_SBC(hd6301v1_cpu_device, HD6301V1, hd6301v1, "Hitachi HD6301V1")
-DEFINE_SBC(hd6301x0_cpu_device, HD6301X0, hd6301x0, "Hitachi HD6301X0")
-DEFINE_SBC(hd6301y0_cpu_device, HD6301Y0, hd6301y0, "Hitachi HD6301Y0")
+// ROM variants (HD6301) removed - use ROMless HD6303 instead
+// DEFINE_SBC(hd6301v1_cpu_device, HD6301V1, hd6301v1, "Hitachi HD6301V1") // Requires ROM - use HD6303R
+// DEFINE_SBC(hd6301x0_cpu_device, HD6301X0, hd6301x0, "Hitachi HD6301X0") // Requires ROM - use HD6303X
+// DEFINE_SBC(hd6301y0_cpu_device, HD6301Y0, hd6301y0, "Hitachi HD6301Y0") // Requires ROM - use HD6303Y
 DEFINE_SBC(hd6303r_cpu_device, HD6303R, hd6303r, "Hitachi HD6303R")
 DEFINE_SBC(hd6303y_cpu_device, HD6303Y, hd6303y, "Hitachi HD6303Y")
 DEFINE_SBC(nsc8105_cpu_device, NSC8105, nsc8105, "National NSC8105")
@@ -1258,10 +1260,13 @@ DEFINE_SBC(upd7810_device, UPD7810, upd7810, "NEC uPD7810")
 // Microcontrollers - 8051 family
 // ----------------------------------------------------------------------------
 
-DEFINE_SBC(i8051_device, I8051, i8051, "Intel 8051")
-DEFINE_SBC(i8052_device, I8052, i8052, "Intel 8052")
-DEFINE_SBC(i80c51_device, I80C51, i80c51, "Intel 80C51")
-DEFINE_SBC(i80c52_device, I80C52, i80c52, "Intel 80C52")
+// ROM variants replaced with ROMless equivalents (i8031/i8032)
+DEFINE_SBC(i8031_device, I8031, i8031, "Intel 8031 (ROMless 8051)")
+DEFINE_SBC(i8032_device, I8032, i8032, "Intel 8032 (ROMless 8052)")
+// DEFINE_SBC(i8051_device, I8051, i8051, "Intel 8051") // Requires ROM region
+// DEFINE_SBC(i8052_device, I8052, i8052, "Intel 8052") // Requires ROM region
+// DEFINE_SBC(i80c51_device, I80C51, i80c51, "Intel 80C51") // Requires ROM region
+// DEFINE_SBC(i80c52_device, I80C52, i80c52, "Intel 80C52") // Requires ROM region
 // DEFINE_SBC(at89c4051_device, AT89C4051, at89c4051, "Atmel AT89C4051") // BROKEN: validation fails
 DEFINE_SBC(ds5002fp_device, DS5002FP, ds5002fp, "Dallas DS5002FP")
 
@@ -1269,14 +1274,16 @@ DEFINE_SBC(ds5002fp_device, DS5002FP, ds5002fp, "Dallas DS5002FP")
 // Microcontrollers - PIC
 // ----------------------------------------------------------------------------
 
-DEFINE_SBC(pic16c54_device, PIC16C54, pic16c54, "Microchip PIC16C54")
-DEFINE_SBC(pic16c55_device, PIC16C55, pic16c55, "Microchip PIC16C55")
-DEFINE_SBC(pic16c56_device, PIC16C56, pic16c56, "Microchip PIC16C56")
-DEFINE_SBC(pic16c57_device, PIC16C57, pic16c57, "Microchip PIC16C57")
-DEFINE_SBC(pic16c58_device, PIC16C58, pic16c58, "Microchip PIC16C58")
-// DEFINE_SBC(pic16c62x_device, PIC16C62X, pic16c62x, "Microchip PIC16C62x")
-DEFINE_SBC(pic17c43_device, PIC17C43, pic17c43, "Microchip PIC17C43")
-DEFINE_SBC(pic17c44_device, PIC17C44, pic17c44, "Microchip PIC17C44")
+// PICs cannot be supported: Harvard architecture with NO external memory bus.
+// Internal ROM is the ONLY program storage - cannot execute from RAM.
+// DEFINE_SBC(pic16c54_device, PIC16C54, pic16c54, "Microchip PIC16C54") // No external memory
+// DEFINE_SBC(pic16c55_device, PIC16C55, pic16c55, "Microchip PIC16C55") // No external memory
+// DEFINE_SBC(pic16c56_device, PIC16C56, pic16c56, "Microchip PIC16C56") // No external memory
+// DEFINE_SBC(pic16c57_device, PIC16C57, pic16c57, "Microchip PIC16C57") // No external memory
+// DEFINE_SBC(pic16c58_device, PIC16C58, pic16c58, "Microchip PIC16C58") // No external memory
+// DEFINE_SBC(pic16c62x_device, PIC16C62X, pic16c62x, "Microchip PIC16C62x") // No external memory
+// DEFINE_SBC(pic17c43_device, PIC17C43, pic17c43, "Microchip PIC17C43") // No external memory
+// DEFINE_SBC(pic17c44_device, PIC17C44, pic17c44, "Microchip PIC17C44") // No external memory
 
 // ----------------------------------------------------------------------------
 // Microcontrollers - AVR
@@ -1303,8 +1310,9 @@ DEFINE_SBC(m68hc05eg_device, M68HC05EG, m68hc05eg, "Motorola 68HC05EG")
 // Microcontrollers - Intel MCS-48
 // ----------------------------------------------------------------------------
 
-DEFINE_SBC(i8021_device, I8021, i8021, "Intel 8021")
-DEFINE_SBC(i8022_device, I8022, i8022, "Intel 8022")
+// ROM variants (i8021/i8022) removed - use ROMless i8035/i8039 instead
+// DEFINE_SBC(i8021_device, I8021, i8021, "Intel 8021") // Requires ROM region - use i8035
+// DEFINE_SBC(i8022_device, I8022, i8022, "Intel 8022") // Requires ROM region - use i8039
 DEFINE_SBC(i8035_device, I8035, i8035, "Intel 8035")
 DEFINE_SBC(i8039_device, I8039, i8039, "Intel 8039")
 DEFINE_SBC(i8040_device, I8040, i8040, "Intel 8040")
@@ -1431,12 +1439,14 @@ DEFINE_SBC(tmp91641_device, TMP91641, tmp91641, "Toshiba TMP91641 (TLCS-900)")
 DEFINE_SBC(pps4_device, PPS4, pps4, "Rockwell PPS-4")
 
 // Sharp SM500/SM510/SM511/SM530
-DEFINE_SBC(sm500_device, SM500, sm500, "Sharp SM500")
-DEFINE_SBC(sm510_device, SM510, sm510, "Sharp SM510")
-DEFINE_SBC(sm511_device, SM511, sm511, "Sharp SM511")
-DEFINE_SBC(sm530_device, SM530, sm530, "Sharp SM530")
-DEFINE_SBC(sm590_device, SM590, sm590, "Sharp SM590")
-DEFINE_SBC(sm5a_device, SM5A, sm5a, "Sharp SM5A")
+// Sharp SM series cannot be supported: Application-specific chips with mask ROM.
+// Each chip IS a specific calculator/game - ROM contains the entire application.
+// DEFINE_SBC(sm500_device, SM500, sm500, "Sharp SM500") // Application-specific mask ROM
+// DEFINE_SBC(sm510_device, SM510, sm510, "Sharp SM510") // Application-specific mask ROM
+// DEFINE_SBC(sm511_device, SM511, sm511, "Sharp SM511") // Application-specific mask ROM
+// DEFINE_SBC(sm530_device, SM530, sm530, "Sharp SM530") // Application-specific mask ROM
+// DEFINE_SBC(sm590_device, SM590, sm590, "Sharp SM590") // Application-specific mask ROM
+// DEFINE_SBC(sm5a_device, SM5A, sm5a, "Sharp SM5A") // Application-specific mask ROM
 
 // ----------------------------------------------------------------------------
 // Game/Graphics CPUs
@@ -1546,10 +1556,11 @@ DEFINE_SBC(tms9995_device, TMS9995, tms9995, "TI TMS9995")
 // DEFINE_SBC(tms99110a_device, TMS99110A, tms99110a, "TI TMS99110A")
 
 // Texas Instruments TMS7000
-DEFINE_SBC(tms7000_device, TMS7000, tms7000, "TI TMS7000")
-DEFINE_SBC(tms70c00_device, TMS70C00, tms70c00, "TI TMS70C00")
-DEFINE_SBC(tms70c20_device, TMS70C20, tms70c20, "TI TMS70C20")
-DEFINE_SBC(tms70c40_device, TMS70C40, tms70c40, "TI TMS70C40")
+// TMS7000 is ROMless - ROM variants (TMS70Cxx) commented out
+DEFINE_SBC(tms7000_device, TMS7000, tms7000, "TI TMS7000 (ROMless)")
+// DEFINE_SBC(tms70c00_device, TMS70C00, tms70c00, "TI TMS70C00") // Requires ROM region
+// DEFINE_SBC(tms70c20_device, TMS70C20, tms70c20, "TI TMS70C20") // Requires ROM region
+// DEFINE_SBC(tms70c40_device, TMS70C40, tms70c40, "TI TMS70C40") // Requires ROM region
 
 // Zilog Z8
 // DEFINE_SBC(z8_device, Z8, z8, "Zilog Z8")
@@ -1663,9 +1674,9 @@ DEFINE_SBC(v35_device, V35, v35, "NEC V35")
 // Additional microcontroller variants
 // ----------------------------------------------------------------------------
 
-// More 8051 variants
-DEFINE_SBC(i8751_device, I8751, i8751, "Intel 8751")
-DEFINE_SBC(i8752_device, I8752, i8752, "Intel 8752")
+// More 8051 variants - EPROM versions also require ROM regions, use i8031/i8032 instead
+// DEFINE_SBC(i8751_device, I8751, i8751, "Intel 8751") // Requires EPROM region (use i8031)
+// DEFINE_SBC(i8752_device, I8752, i8752, "Intel 8752") // Requires EPROM region (use i8032)
 DEFINE_SBC(i80c51gb_device, I80C51GB, i80c51gb, "Intel 80C51GB")
 // DEFINE_SBC(at89c52_device, AT89C52, at89c52, "Atmel AT89C52") // BROKEN: validation fails
 // DEFINE_SBC(at89s52_device, AT89S52, at89s52, "Atmel AT89S52") // BROKEN: validation fails
@@ -1868,8 +1879,10 @@ DEFINE_SBC(unsp_device, UNSP, unsp, "SunPlus unSP")
 // DEFINE_SBC(tlcs900h_device, TLCS900H, tlcs900h, "Toshiba TLCS-900/H")
 
 // More Zilog Z8 variants
-DEFINE_SBC(z8601_device, Z8601, z8601, "Zilog Z8601")
-DEFINE_SBC(z8611_device, Z8611, z8611, "Zilog Z8611")
+// ROM variants replaced with ROMless Z8681
+DEFINE_SBC(z8681_device, Z8681, z8681, "Zilog Z8681 (ROMless)")
+// DEFINE_SBC(z8601_device, Z8601, z8601, "Zilog Z8601") // Requires ROM region
+// DEFINE_SBC(z8611_device, Z8611, z8611, "Zilog Z8611") // Requires ROM region
 
 // More Epson variants
 // DEFINE_SBC(s1c17_device, S1C17, s1c17, "Seiko Epson S1C17")
