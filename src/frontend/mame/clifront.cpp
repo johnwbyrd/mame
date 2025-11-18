@@ -443,27 +443,19 @@ void cli_frontend::listcpu(const std::vector<std::string> &args)
 				device_execute_interface *exec = nullptr;
 				if (device.interface(exec))
 				{
-					// Get the C++ class name from type_info and demangle it
-					const char *mangled = device.type().type().name();
 					std::string class_name;
 
 #if defined(__GNUC__) || defined(__clang__)
-					// GCC/Clang: use abi::__cxa_demangle
+					// GCC/Clang: demangle the C++ class name
+					const char *mangled = device.type().type().name();
 					int status = 0;
 					char *demangled = abi::__cxa_demangle(mangled, nullptr, nullptr, &status);
 					class_name = (status == 0 && demangled) ? demangled : mangled;
 					if (demangled)
 						std::free(demangled);
 #else
-					// MSVC or other compilers: use mangled name as-is
-					// MSVC mangled names are often readable enough (e.g., "class pentium_device")
-					class_name = mangled;
-
-					// Strip common MSVC prefixes for better readability
-					if (class_name.compare(0, 6, "class ") == 0)
-						class_name = class_name.substr(6);
-					else if (class_name.compare(0, 7, "struct ") == 0)
-						class_name = class_name.substr(7);
+					// MSVC: leave class_name empty, we won't display it
+					class_name = "";
 #endif
 
 					cpus.emplace_back(device.shortname(), class_name, device.name());
@@ -477,12 +469,34 @@ void cli_frontend::listcpu(const std::vector<std::string> &args)
 	// Output sorted list
 	if (!cpus.empty())
 	{
+#if defined(__GNUC__) || defined(__clang__)
+		// GCC/Clang: 3 columns with device name
 		osd_printf_info("Short name:       Device name:                  Full name:\n");
 		for (const auto &cpu : cpus)
+		{
+			// Replace double quotes with single quotes in full name
+			std::string fullname = std::get<2>(cpu);
+			std::replace(fullname.begin(), fullname.end(), '"', '\'');
+
 			osd_printf_info("%-17s %-29s \"%s\"\n",
 				std::get<0>(cpu).c_str(),
 				std::get<1>(cpu).c_str(),
-				std::get<2>(cpu).c_str());
+				fullname.c_str());
+		}
+#else
+		// MSVC: 2 columns without device name
+		osd_printf_info("Short name:       Full name:\n");
+		for (const auto &cpu : cpus)
+		{
+			// Replace double quotes with single quotes in full name
+			std::string fullname = std::get<2>(cpu);
+			std::replace(fullname.begin(), fullname.end(), '"', '\'');
+
+			osd_printf_info("%-17s \"%s\"\n",
+				std::get<0>(cpu).c_str(),
+				fullname.c_str());
+		}
+#endif
 	}
 }
 
