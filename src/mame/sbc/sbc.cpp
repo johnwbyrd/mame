@@ -459,35 +459,51 @@ class sbc_state : public driver_device {
 
 	uint8_t vdg_videoram_r(offs_t offset);
 
-	// Calculate video RAM address based on CPU address space size.
-	// Strategy: Place VRAM near top of address space to maximize contiguous
-	// low memory for programs, while reserving 256 bytes above VRAM for
-	// CPU-specific vectors (6502 reset/IRQ, Z80 IM2, etc).
-	uint32_t get_vram_addr() const {
+	// Calculate reserved region start address.
+	// For an n-bit address bus, the reserved region starts where the top n/2
+	// bits are all 1s. This scales the reserved region proportionally with
+	// address space size:
+	//   16-bit (64KB):  reserved starts at 0xFF00 (top 8 bits = 1)
+	//   24-bit (16MB):  reserved starts at 0xFFF000 (top 12 bits = 1)
+	//   32-bit (4GB):   reserved starts at 0xFFFF0000 (top 16 bits = 1)
+	uint64_t get_reserved_start() const {
+		if (!m_maincpu || !m_maincpu->has_space(AS_PROGRAM))
+			return 0xFF00; // Fallback for 16-bit
+
+		uint8_t addr_bits = m_maincpu->space(AS_PROGRAM).addr_width();
+		uint8_t half_bits = addr_bits / 2;
+
+		// Reserved starts where top half of address bits are 1s
+		return (1ULL << addr_bits) - (1ULL << half_bits);
+	}
+
+	// Calculate semihosting interface address.
+	// Semihosting buffer (1024 bytes) is placed just before video RAM.
+	uint64_t get_semihost_addr() const {
+		if (!m_maincpu || !m_maincpu->has_space(AS_PROGRAM))
+			return 0; // Disabled if no CPU
+
+		uint64_t reserved_start = get_reserved_start();
+		const uint32_t vram_size = 512;
+		const uint32_t semihost_size = 1024;
+
+		uint64_t vram_base = reserved_start - vram_size;
+		return vram_base - semihost_size;
+	}
+
+	// Calculate video RAM address.
+	// VRAM (512 bytes) is placed just before the reserved region.
+	uint64_t get_vram_addr() const {
 		if (VRAM_ADDR != 0)
 			return VRAM_ADDR; // Explicit override
 
-		// Auto-calculate: place VRAM near top of address space
-		// Leave 256 bytes for high RAM/vectors
 		if (!m_maincpu || !m_maincpu->has_space(AS_PROGRAM))
 			return 0xFD00; // Fallback for 16-bit
 
-		uint8_t addr_bits = m_maincpu->space(AS_PROGRAM).addr_width();
+		uint64_t reserved_start = get_reserved_start();
+		const uint32_t vram_size = 512;
 
-		if (addr_bits <= 16)
-			return 0xFD00; // 16-bit: 0xFD00-0xFEFF, high RAM at 0xFF00-0xFFFF
-		else if (addr_bits <= 24)
-			return 0xFFFD00; // 24-bit
-		else
-			return 0xFFFFFD00; // 32-bit+
-	}
-
-	uint32_t get_ram_size() const {
-		if (!m_maincpu || !m_maincpu->has_space(AS_PROGRAM))
-			return 0x10000; // Fallback
-
-		uint8_t addr_bits = m_maincpu->space(AS_PROGRAM).addr_width();
-		return (1ULL << addr_bits);
+		return reserved_start - vram_size;
 	}
 
 	int m_cursor_pos;
@@ -502,20 +518,65 @@ void sbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::mem_map(
     address_map &map) {
 	map.unmap_value_high(); // Unmapped reads return 0xFF (floating bus)
 
-	uint32_t vram_addr = get_vram_addr();
-	uint32_t ram_size = get_ram_size();
+	// Early exit: Check if CPU has program space
+	if (!m_maincpu || !m_maincpu->has_space(AS_PROGRAM))
+		return;
 
-	// Map RAM in sections around video RAM (creates fragmented address space)
-	if (vram_addr > 0)
-		map(0x0000, vram_addr - 1).ram();
+	// Skip CPUs with self-managed RAM devices (psxcpu, Emotion Engine, etc.)
+	if (m_maincpu->subdevice("ram") != nullptr)
+		return;
 
-	// Video RAM (512 bytes) gap - installed later in machine_start()
-	// Must use install_ram() instead of map().ram() to force 8-bit access
-	// on CPUs with 16/32-bit bus widths. The MC6847 requires byte-level reads.
+	// Skip CPUs with internal ROM/RAM (PICs, AVR, 8051, etc.)
+	device_memory_interface *memory_interface;
+	if (m_maincpu->interface(memory_interface)) {
+		const address_space_config *prog_config = memory_interface->space_config(AS_PROGRAM);
+		if (prog_config && !prog_config->m_internal_map.isnull()) {
+			// CPU has internal ROM/RAM, let it manage memory
+			return;
+		}
 
-	uint32_t after_vram = vram_addr + 0x200;
-	if (after_vram < ram_size)
-		map(after_vram, ram_size - 1).ram();
+		// Skip Harvard architecture CPUs with internal data space
+		if (m_maincpu->has_space(AS_DATA)) {
+			const address_space_config *data_config = memory_interface->space_config(AS_DATA);
+			if (data_config && !data_config->m_internal_map.isnull()) {
+				// CPU has internal data memory
+				return;
+			}
+		}
+	}
+
+	// Get address space properties
+	const address_space &prog_space = m_maincpu->space(AS_PROGRAM);
+	offs_t addr_mask = prog_space.addrmask();
+
+	// Calculate memory region addresses
+	uint64_t semihost_base = get_semihost_addr();
+	const uint32_t vram_size = 512;
+
+	// Minimum viable address space check
+	// Need at least: load_addr + 2KB program space + semihost + vram
+	const uint32_t min_program_space = 2048;
+	const uint32_t semihost_size = 1024;
+	uint64_t min_required = LOAD_ADDR + min_program_space + semihost_size + vram_size;
+
+	if ((addr_mask + 1) < min_required) {
+		// Address space too small for peripherals, just map all as RAM
+		map(0x0000, addr_mask).ram();
+		return;
+	}
+
+	// Calculate RAM end (just before semihosting region)
+	uint64_t ram_end = semihost_base - 1;
+
+	// Map RAM from load address to just before semihosting
+	// This leaves room for both semihosting and video RAM at top
+	if (ram_end > LOAD_ADDR && ram_end <= addr_mask) {
+		map(LOAD_ADDR, ram_end).ram();
+	}
+
+	// Video RAM (512 bytes) is installed later in machine_start()
+	// using install_ram() to force 8-bit access on 16/32-bit CPUs.
+	// The MC6847 VDG requires byte-level reads.
 }
 
 template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
@@ -622,7 +683,10 @@ void sbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::center_line(
 	for (int i = 0; i < len; i++)
 		chrout(text[i]);
 
-	chrout('\r');
+	// Only add newline if we're not already at the start of a line
+	// (which happens when text wraps beyond LINE_WIDTH)
+	if ((m_cursor_pos % LINE_WIDTH) != 0)
+		chrout('\r');
 }
 
 template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
@@ -633,26 +697,31 @@ void sbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
 
 	m_cursor_pos = 0;
 
-	center_line("Single board computer");
+	center_line("Zero board computer");
 	center_line(m_maincpu->name());
 	center_line("");
-	center_line("github.com/johnwbyrd/semihost");
+	center_line("www.zeroboardcomputer.com");
 	center_line("");
 
 	// Display memory configuration
 	char addr_buf[64];
-	uint32_t vram_addr = get_vram_addr();
-	uint32_t available_ram = vram_addr - LOAD_ADDR;
+	uint64_t semihost_addr = get_semihost_addr();
+	uint64_t vram_addr = get_vram_addr();
+	uint64_t available_ram = semihost_addr - LOAD_ADDR;
 
-	snprintf(addr_buf, sizeof(addr_buf), "Load address: 0x%X", LOAD_ADDR);
+	snprintf(addr_buf, sizeof(addr_buf), "Load address: 0x%llX", (unsigned long long)LOAD_ADDR);
 	center_line(addr_buf);
 
-	snprintf(addr_buf, sizeof(addr_buf), "Available RAM: %u bytes",
-	         available_ram);
+	snprintf(addr_buf, sizeof(addr_buf), "Available RAM: %llu bytes",
+	         (unsigned long long)available_ram);
 	center_line(addr_buf);
 
-	snprintf(addr_buf, sizeof(addr_buf), "Video RAM: 0x%X-0x%X",
-	         vram_addr, vram_addr + 0x1FF);
+	snprintf(addr_buf, sizeof(addr_buf), "Semihost: 0x%llX-0x%llX",
+	         (unsigned long long)semihost_addr, (unsigned long long)(semihost_addr + 0x3FF));
+	center_line(addr_buf);
+
+	snprintf(addr_buf, sizeof(addr_buf), "Video RAM: 0x%llX-0x%llX",
+	         (unsigned long long)vram_addr, (unsigned long long)(vram_addr + 0x1FF));
 	center_line(addr_buf);
 
 	center_line("");
@@ -828,7 +897,7 @@ void sbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::sbc(
 	ROM_END                                                                    \
 	COMP(2025, sbc##short_name, 0, 0, machine_config, 0,                       \
 	     sbc_##short_name##_state, empty_init, "MAME",                         \
-	     "Single Board Computer - " display_name, MACHINE_NO_SOUND_HW)
+	     "Zero Board Computer - " display_name, MACHINE_NO_SOUND_HW)
 
 // Define SBC variants for major CPU architectures.
 // Each line creates a complete emulated machine accessible via command line.
