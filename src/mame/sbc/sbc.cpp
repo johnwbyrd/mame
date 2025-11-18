@@ -1012,9 +1012,10 @@ DEFINE_SBC(m7501_device, M7501, m7501, "MOS 7501")
 // DEFINE_SBC(n2a03_device, N2A03, n2a03, "Ricoh N2A03 (NES)") // N2A03 doesn't exist, use RP2A03
 // DEFINE_SBC(rp2a07_device, RP2A07, rp2a07, "Ricoh RP2A07 (PAL NES)") // RP2A07 doesn't exist
 DEFINE_SBC(rp2a03g_device, RP2A03G, rp2a03g, "Ricoh RP2A03G (PAL NES)")
-// M5074X doesn't exist - using M50740 and M50741 instead
-DEFINE_SBC(m50740_device, M50740, m50740, "Mitsubishi M50740")
-DEFINE_SBC(m50741_device, M50741, m50741, "Mitsubishi M50741")
+// M50740/M50741 require internal ROM - use M50753 instead (ROMless variant)
+// DEFINE_SBC(m50740_device, M50740, m50740, "Mitsubishi M50740") // Requires ROM region
+// DEFINE_SBC(m50741_device, M50741, m50741, "Mitsubishi M50741") // Requires ROM region
+DEFINE_SBC(m50753_device, M50753, m50753, "Mitsubishi M50753")
 DEFINE_SBC(st2205u_device, ST2205U, st2205u, "Sitronix ST2205U")
 DEFINE_SBC(st2302u_device, ST2302U, st2302u, "Sitronix ST2302U")
 DEFINE_SBC(xavix2_device, XAVIX2, xavix2, "SSD XaviX 2")
@@ -1126,8 +1127,9 @@ DEFINE_SBC(vr5500be_device, VR5500BE, vr5500be, "NEC VR5500 Big-Endian")
 DEFINE_SBC(vr5500le_device, VR5500LE, vr5500le, "NEC VR5500 Little-Endian")
 DEFINE_SBC(rm7000be_device, RM7000BE, rm7000be, "QED RM7000 Big-Endian")
 DEFINE_SBC(rm7000le_device, RM7000LE, rm7000le, "QED RM7000 Little-Endian")
-DEFINE_SBC(r5900be_device, R5900BE, r5900be, "Toshiba R5900 Big-Endian (PS2 EE)")
-DEFINE_SBC(r5900le_device, R5900LE, r5900le, "Toshiba R5900 Little-Endian (PS2 EE)")
+// R5900 (PlayStation 2 Emotion Engine) requires VU0 coprocessor - not suitable for simple SBC
+// DEFINE_SBC(r5900be_device, R5900BE, r5900be, "Toshiba R5900 Big-Endian (PS2 EE)") // Requires VU0 device
+// DEFINE_SBC(r5900le_device, R5900LE, r5900le, "Toshiba R5900 Little-Endian (PS2 EE)") // Requires VU0 device
 
 // PowerPC family
 DEFINE_SBC(ppc403ga_device, PPC403GA, ppc403ga, "PowerPC 403GA")
@@ -1164,8 +1166,8 @@ DEFINE_SBC(i80960kb_device, I80960KB, i80960kb, "Intel i960KB")
 // DEFINE_SBC(clipper_c300_device, CLIPPER_C300, clipperc300, "Fairchild Clipper C300") // BROKEN: validation fails
 // DEFINE_SBC(clipper_c400_device, CLIPPER_C400, clipperc400, "Fairchild Clipper C400") // BROKEN: validation fails
 
-// ROMP
-DEFINE_SBC(romp_device, ROMP, romp, "IBM ROMP")
+// ROMP requires MMU (Rosetta) and IOU companion devices - not suitable for simple SBC
+// DEFINE_SBC(romp_device, ROMP, romp, "IBM ROMP") // Requires MMU + IOU devices
 
 // AM29000
 // DEFINE_SBC(am29000_cpu_device, AM29000, am29000, "AMD Am29000") // Conflicts with clipper.h
@@ -1229,8 +1231,8 @@ DEFINE_SBC(mc88100_device, MC88100, mc88100, "Motorola MC88100")
 // Analog Devices SHARC
 DEFINE_SBC(adsp21062_device, ADSP21062, adsp21062, "Analog Devices ADSP-21062 (SHARC)")
 
-// WE DSP16
-DEFINE_SBC(dsp16_device, DSP16, dsp16, "AT&T DSP16")
+// DSP16 requires external ROM region - cannot work without program storage
+// DEFINE_SBC(dsp16_device, DSP16, dsp16, "AT&T DSP16") // Requires external ROM region
 
 // WE DSP32C
 DEFINE_SBC(dsp32c_device, DSP32C, dsp32c, "AT&T DSP32C")
@@ -1298,7 +1300,8 @@ DEFINE_SBC(ds5002fp_device, DS5002FP, ds5002fp, "Dallas DS5002FP")
 // Microcontrollers - Motorola 68HC
 // ----------------------------------------------------------------------------
 
-DEFINE_SBC(m68hc05c4_device, M68HC05C4, m68hc05c4, "Motorola 68HC05C4")
+// M68HC05C4 requires internal ROM/EEPROM - use M68HC05EG (ROMless variant with more RAM)
+// DEFINE_SBC(m68hc05c4_device, M68HC05C4, m68hc05c4, "Motorola 68HC05C4") // Requires ROM region
 DEFINE_SBC(m68hc05eg_device, M68HC05EG, m68hc05eg, "Motorola 68HC05EG")
 // DEFINE_SBC(m68hc11a1_device, M68HC11A1, m68hc11a1, "Motorola 68HC11A1")
 // DEFINE_SBC(m68hc11d0_device, M68HC11D0, m68hc11d0, "Motorola 68HC11D0")
@@ -1338,13 +1341,15 @@ DEFINE_SBC(mb8884_device, MB8884, mb8884, "Fujitsu MB8884")
 // Microcontrollers - Hitachi H8
 // ----------------------------------------------------------------------------
 
+// H8/325 requires internal mask ROM - cannot work without it
 // DEFINE_SBC(h8_device, H8, h8, "Hitachi H8")
-DEFINE_SBC(h8325_device, H8325, h8325, "Hitachi H8/325")
+// DEFINE_SBC(h8325_device, H8325, h8325, "Hitachi H8/325") // Requires internal ROM region
 // DEFINE_SBC(h8520_device, H8520, h8520, "Hitachi H8/520")
 // DEFINE_SBC(h8h_device, H8H, h8h, "Hitachi H8H")
 // DEFINE_SBC(h8s2000_device, H8S2000, h8s2000, "Hitachi H8S/2000")
 // DEFINE_SBC(h8s2600_device, H8S2600, h8s2600, "Hitachi H8S/2600")
-DEFINE_SBC(gt913_device, GT913, gt913, "Hitachi GT913")
+// GT913F is too complex - requires internal ROM, keyboard controller, and multiple I/O ports
+// DEFINE_SBC(gt913_device, GT913, gt913, "Hitachi GT913") // Complex SoC - requires ROM and companion devices
 
 // ----------------------------------------------------------------------------
 // Microcontrollers - Hitachi/Renesas SuperH
@@ -1364,18 +1369,20 @@ DEFINE_SBC(sh3_device, SH3, sh3, "Hitachi SH-3")
 DEFINE_SBC(upd7801_device, UPD7801, upd7801, "NEC uPD7801")
 DEFINE_SBC(upd7807_device, UPD7807, upd7807, "NEC uPD7807")
 DEFINE_SBC(upd78c05_device, UPD78C05, upd78c05, "NEC uPD78C05")
-DEFINE_SBC(upd78c06_device, UPD78C06, upd78c06, "NEC uPD78C06")
+// uPD78C06/C11/C14 require internal mask ROM - use uPD78C05 (ROMless variant)
+// DEFINE_SBC(upd78c06_device, UPD78C06, upd78c06, "NEC uPD78C06") // Requires internal ROM region
 DEFINE_SBC(upd78c10_device, UPD78C10, upd78c10, "NEC uPD78C10")
-DEFINE_SBC(upd78c11_device, UPD78C11, upd78c11, "NEC uPD78C11")
-DEFINE_SBC(upd78c14_device, UPD78C14, upd78c14, "NEC uPD78C14")
+// DEFINE_SBC(upd78c11_device, UPD78C11, upd78c11, "NEC uPD78C11") // Requires internal ROM region
+// DEFINE_SBC(upd78c14_device, UPD78C14, upd78c14, "NEC uPD78C14") // Requires internal ROM region
 
 // ----------------------------------------------------------------------------
 // Microcontrollers - Toshiba TLCS
 // ----------------------------------------------------------------------------
 
-DEFINE_SBC(tmp90840_device, TMP90840, tmp90840, "Toshiba TMP90840 (TLCS-90)")
+// TMP90840 and TMP91640 require internal ROM - use TMP90841 (ROMless variant)
+// DEFINE_SBC(tmp90840_device, TMP90840, tmp90840, "Toshiba TMP90840 (TLCS-90)") // Requires internal ROM region
 DEFINE_SBC(tmp90841_device, TMP90841, tmp90841, "Toshiba TMP90841 (TLCS-90)")
-DEFINE_SBC(tmp91640_device, TMP91640, tmp91640, "Toshiba TMP91640 (TLCS-900)")
+// DEFINE_SBC(tmp91640_device, TMP91640, tmp91640, "Toshiba TMP91640 (TLCS-900)") // Requires internal ROM region
 DEFINE_SBC(tmp91641_device, TMP91641, tmp91641, "Toshiba TMP91641 (TLCS-900)")
 
 // ----------------------------------------------------------------------------
@@ -1532,8 +1539,8 @@ DEFINE_SBC(sc61860_device, SC61860, sc61860, "Sharp SC61860 (Pocket Computer)")
 // Intel 8008
 DEFINE_SBC(i8008_device, I8008, i8008, "Intel 8008")
 
-// Intel 8089
-DEFINE_SBC(i8089_device, I8089, i8089, "Intel 8089 I/O Processor")
+// Intel 8089 requires set_data_width(16) configuration - not suitable for simple SBC macro
+// DEFINE_SBC(i8089_device, I8089, i8089, "Intel 8089 I/O Processor") // Requires set_data_width(16)
 
 // Fairchild F8
 // DEFINE_SBC(f8_device, F8, f8, "Fairchild F8")
@@ -1808,8 +1815,8 @@ DEFINE_SBC(lsi11_device, LSI11, lsi11, "DEC LSI-11")
 // DEFINE_SBC(hd63701_cpu_device, HD63701, hd63701, "Hitachi HD63701")
 DEFINE_SBC(hd6309e_device, HD6309E, hd6309e, "Hitachi HD6309E")
 
-// More Motorola variants
-DEFINE_SBC(mc68120_device, MC68120, mc68120, "Motorola 68120")
+// MC68120 IPC requires internal ROM - cannot work without it
+// DEFINE_SBC(mc68120_device, MC68120, mc68120, "Motorola 68120") // Requires internal ROM region
 
 // More Toshiba variants
 DEFINE_SBC(tmp95c061_device, TMP95C061, tmp95c061, "Toshiba TMP95C061")

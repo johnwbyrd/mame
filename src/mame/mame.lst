@@ -44085,13 +44085,11 @@ sbccdp1805
 sbccdp1806
 sbcdeco16
 sbcds5002fp
-sbcdsp16
 sbcdsp32c
 sbcdsp56001
 sbcdsp56303
 sbcg65816
 sbcg65sc02
-sbcgt913
 sbch6280
 sbch83002
 sbch83003
@@ -44100,7 +44098,6 @@ sbch83007
 sbch83008
 sbch83044
 sbch83045
-sbch8325
 sbchd6120
 sbchd6303r
 sbchd6303x
@@ -44125,7 +44122,6 @@ sbci8080
 sbci8080a
 sbci8086
 sbci8088
-sbci8089
 sbci80c51gb
 sbci8648
 sbci8742
@@ -44156,7 +44152,6 @@ sbcm6809
 sbcm68ec020
 sbcm68ec030
 sbcm68ec040
-sbcm68hc05c4
 sbcm68hc05eg
 sbcm68lc040
 sbcm7501
@@ -44166,7 +44161,6 @@ sbcmb86235
 sbcmb86930
 sbcmb8884
 sbcmc6809e
-sbcmc68120
 sbcmc68hc11a1
 sbcmc88100
 sbcmcf5206e
@@ -44222,12 +44216,9 @@ sbcr4700be
 sbcr4700le
 sbcr5000be
 sbcr5000le
-sbcr5900be
-sbcr5900le
 sbcr65c02
 sbcrm7000be
 sbcrm7000le
-sbcromp
 sbcrp2a03
 sbcrsp
 sbcs2650
@@ -44243,9 +44234,7 @@ sbcst2204
 sbcst2205u
 sbcst2302u
 sbct11
-sbctmp90840
 sbctmp90841
-sbctmp91640
 sbctmp91641
 sbctmp95c061
 sbctmp95c063
@@ -44273,10 +44262,7 @@ sbcupd7801
 sbcupd7807
 sbcupd7810
 sbcupd78c05
-sbcupd78c06
 sbcupd78c10
-sbcupd78c11
-sbcupd78c14
 sbcv20
 sbcv25
 sbcv30
@@ -44306,8 +44292,6 @@ sbci80960ka
 sbci80960kb
 sbci860
 sbcm37710s4
-sbcm50740
-sbcm50741
 sbcrp2a03g
 
 @source:skeleton/scopus.cpp
