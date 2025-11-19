@@ -1,5 +1,5 @@
 // license:BSD-3-Clause
-// copyright-holders:MAME Team
+// copyright-holders:John Byrd
 /***************************************************************************
 
     Zero Board Computer Templates

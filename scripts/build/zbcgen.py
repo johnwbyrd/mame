@@ -1,4 +1,7 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
+##
+## license:BSD-3-Clause
+## copyright-holders:John Byrd
 """
 ZBC CPU Database Manager
 
