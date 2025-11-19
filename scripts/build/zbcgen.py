@@ -181,48 +181,19 @@ class ZBCGenerator:
             print(f"Created new database with {added} CPUs")
 
     def infer_header_file(self, cpu: CPUInfo) -> str:
-        """Infer header file path from class name using heuristics"""
+        """Infer header file path from class name - simple default pattern only"""
         if not cpu.class_name:
             return ""
 
-        # Remove _device suffix
+        # Remove _device and _cpu suffixes to get base name
         base_name = cpu.class_name
         if base_name.endswith('_device'):
             base_name = base_name[:-len('_device')]
         if base_name.endswith('_cpu'):
             base_name = base_name[:-len('_cpu')]
 
-        # Common patterns
-        patterns = [
-            # Intel x86
-            (r'^i[0-9]+.*', 'cpu/i386/i386.h'),
-            (r'^pentium.*', 'cpu/i386/i386.h'),
-            (r'^athlon.*', 'cpu/i386/athlon.h'),
-            # 6502 family
-            (r'^m65[0-9]+.*', 'cpu/m6502/m6502.h'),
-            (r'^r65.*', 'cpu/m6502/r65c02.h'),
-            (r'^w65.*', 'cpu/m6502/w65c02.h'),
-            (r'^g65.*', 'cpu/m6502/g65sc02.h'),
-            # Z80 family
-            (r'^z80.*', 'cpu/z80/z80.h'),
-            (r'^z180.*', 'cpu/z180/z180.h'),
-            (r'^z8.*', 'cpu/z8/z8.h'),
-            # ARM family
-            (r'^arm[0-9]+.*', 'cpu/arm7/arm7.h'),
-            (r'^arm.*', 'cpu/arm/arm.h'),
-            # 68000 family
-            (r'^m680[0-9]+.*', 'cpu/m68000/m68000.h'),
-            # MIPS
-            (r'^r[0-9]+.*', 'cpu/mips/mips1.h'),
-            # PowerPC
-            (r'^ppc.*', 'cpu/powerpc/ppc.h'),
-        ]
-
-        for pattern, header in patterns:
-            if re.match(pattern, base_name.lower()):
-                return header
-
-        # Default: cpu/<base_name>/<base_name>.h
+        # Simple default: cpu/<base_name>/<base_name>.h
+        # If this is wrong, it will be caught by validation and must be fixed manually in CSV
         return f"cpu/{base_name}/{base_name}.h"
 
     def mark_broken_compile(self, build_log: str) -> None:
@@ -285,16 +256,43 @@ class ZBCGenerator:
         else:
             print(f"Marked {marked} CPUs as broken_validate")
 
+    def validate_header_and_device(self, header_path: str, type_constant: str) -> bool:
+        """Check if header file exists AND declares the device type"""
+        # Try relative to MAME source root
+        full_path = Path("src/devices") / header_path
+
+        if not full_path.exists():
+            return False
+
+        # Check if the header actually declares this device type
+        try:
+            content = full_path.read_text(encoding='utf-8', errors='ignore')
+            # Look for DECLARE_DEVICE_TYPE(TYPE_CONSTANT, ...)
+            pattern = rf'DECLARE_DEVICE_TYPE\s*\(\s*{re.escape(type_constant)}\s*,'
+            if re.search(pattern, content):
+                return True
+        except Exception:
+            pass
+
+        return False
+
     def generate_hpp(self, output_path: str = "src/mame/zbc/zbcgen.hpp") -> None:
         """Generate zbcgen.hpp with all CPU header includes"""
         output_file = Path(output_path)
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Collect headers (only for working CPUs)
+        # Collect headers (only for working CPUs with valid headers)
         headers = set()
+        missing_headers = []
+        cpus_with_missing_headers = []
+
         for cpu in self.cpus.values():
             if cpu.status == STATUS_WORKING and cpu.header_file:
-                headers.add(cpu.header_file)
+                if self.validate_header_and_device(cpu.header_file, cpu.type_constant):
+                    headers.add(cpu.header_file)
+                else:
+                    missing_headers.append((cpu.shortname, cpu.header_file))
+                    cpus_with_missing_headers.append(cpu)
 
         # Sort alphabetically
         sorted_headers = sorted(headers)
@@ -304,6 +302,8 @@ class ZBCGenerator:
             f.write(f"// Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"// Source: {self.csv_path}\n")
             f.write(f"// Working CPUs: {len([c for c in self.cpus.values() if c.status == STATUS_WORKING])}\n")
+            if missing_headers:
+                f.write(f"// WARNING: {len(missing_headers)} CPUs have missing header files (excluded)\n")
             f.write("\n")
             f.write("#ifndef MAME_ZBC_ZBCGEN_HPP\n")
             f.write("#define MAME_ZBC_ZBCGEN_HPP\n")
@@ -318,10 +318,25 @@ class ZBCGenerator:
 
         print(f"Generated {output_file} with {len(sorted_headers)} headers")
 
-    def generate_cpp(self, output_path: str = "src/mame/zbc/zbcgen.cpp") -> None:
-        """Generate zbcgen.cpp with all DEFINE_ZBC calls (NO #includes - will be included by zbc.cpp)"""
+        if missing_headers:
+            print(f"\nWARNING: {len(missing_headers)} CPUs have missing header files:")
+            for shortname, header in missing_headers[:10]:
+                print(f"  - {shortname}: {header}")
+            if len(missing_headers) > 10:
+                print(f"  ... and {len(missing_headers) - 10} more")
+
+        return cpus_with_missing_headers
+
+    def generate_ipp(self, output_path: str = "src/mame/zbc/zbcgen.ipp", cpus_with_missing_headers: Optional[List[CPUInfo]] = None) -> None:
+        """Generate zbcgen.ipp with all DEFINE_ZBC calls (NO #includes - will be included by zbc.cpp)"""
         output_file = Path(output_path)
         output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        if cpus_with_missing_headers is None:
+            cpus_with_missing_headers = []
+
+        # Build set of CPUs with missing headers for quick lookup
+        missing_header_shortnames = {cpu.shortname for cpu in cpus_with_missing_headers}
 
         # Count statistics
         stats = defaultdict(int)
@@ -341,11 +356,14 @@ class ZBCGenerator:
             f.write(f"//   Total CPUs discovered: {len(self.cpus)}\n")
             for status in ALL_STATUSES:
                 f.write(f"//   {status}: {stats[status]}\n")
+            if cpus_with_missing_headers:
+                f.write(f"//   Missing headers: {len(cpus_with_missing_headers)}\n")
             f.write("\n")
 
             # Generate DEFINE_ZBC calls
-            # Group by status
-            working_cpus = [c for c in self.cpus.values() if c.status == STATUS_WORKING]
+            # Group by status (but exclude CPUs with missing headers from working)
+            working_cpus = [c for c in self.cpus.values()
+                           if c.status == STATUS_WORKING and c.shortname not in missing_header_shortnames]
             broken_cpus = [c for c in self.cpus.values() if c.status != STATUS_WORKING]
 
             # Working CPUs
@@ -360,6 +378,21 @@ class ZBCGenerator:
                        f'{cpu.shortname}, "{cpu.fullname}")\n')
 
             f.write("\n")
+
+            # CPUs with missing headers (commented out)
+            if cpus_with_missing_headers:
+                f.write(f"// CPUs with Missing Headers ({len(cpus_with_missing_headers)})\n")
+                f.write("// These CPUs are commented out because their header files could not be found\n")
+                f.write("// Fix the header_file path in zbc_status.csv and regenerate\n")
+                f.write("\n")
+
+                for cpu in sorted(cpus_with_missing_headers, key=lambda c: c.shortname):
+                    if not cpu.class_name or not cpu.type_constant:
+                        continue
+                    f.write(f'// DEFINE_ZBC({cpu.class_name}, {cpu.type_constant}, '
+                           f'{cpu.shortname}, "{cpu.fullname}")\n')
+                    f.write(f'//   Header not found: {cpu.header_file}\n')
+                    f.write("\n")
 
             # Broken/disabled CPUs (commented out)
             f.write(f"// Broken/Disabled CPUs ({len(broken_cpus)})\n")
@@ -377,6 +410,8 @@ class ZBCGenerator:
                 f.write("\n")
 
         print(f"Generated {output_file} with {len(working_cpus)} working CPUs")
+        if cpus_with_missing_headers:
+            print(f"  ({len(cpus_with_missing_headers)} CPUs excluded due to missing headers)")
 
     def update_mame_lst(self, lst_path: str = "src/mame/mame.lst") -> None:
         """Update mame.lst with current working CPUs"""
@@ -518,8 +553,8 @@ For detailed documentation, see docs/source/techspecs/zbc.rst
             print(f"Warning: No CPUs marked as 'working' in CSV. Generated files will be empty.")
             print(f"Edit {args.csv} to mark CPUs as 'working', or run --scan-mame.")
 
-        gen.generate_hpp()
-        gen.generate_cpp()
+        cpus_with_missing_headers = gen.generate_hpp()
+        gen.generate_ipp(cpus_with_missing_headers=cpus_with_missing_headers)
         gen.update_mame_lst()
 
     if not any([args.scan_mame, args.mark_broken_compile, args.mark_broken_validate, args.build]):
