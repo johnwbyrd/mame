@@ -33,10 +33,10 @@ cxd8661r,CXD8661R,cxd8661r_device,Sony CXD8661R,broken_validate,cpu/psx/psx.h,Cr
 deco16,DECO16,deco16_device,Data East DECO16,working,cpu/m6502/deco16.h,
 ds5002fp,DS5002FP,ds5002fp_device,Dallas DS5002FP,working,cpu/mcs51/ds5002fp.h,
 ds80c320,DS80C320,ds80c320_device,Dallas DS80C320 HSM,working,cpu/mcs51/i80c52.h,
-dsp32c,DSP32C,dsp32c_device,AT&T DSP32C,working,cpu/dsp32/dsp32.h,
+dsp32c,DSP32C,dsp32c_device,AT&T DSP32C,broken_validate,cpu/dsp32/dsp32.h,Test failed: Unknown error -11 (exit -11)
 dsp56000,DSP56000,dsp56000_device,Motorola DSP56000,working,cpu/dsp56000/dsp56000.h,
 dsp56001,DSP56001,dsp56001_device,Motorola DSP56001,working,cpu/dsp56000/dsp56000.h,
-dsp56303,DSP56303,dsp56303_device,Motorola DSP56303,working,cpu/dsp563xx/dsp56303.h,
+dsp56303,DSP56303,dsp56303_device,Motorola DSP56303,broken_validate,cpu/dsp563xx/dsp56303.h,Test failed: Missing files (exit 2)
 eisa_dma,EISA_DMA,eisa_dma_device,EISA DMA,not_cpu,,DMA controller
 g65sc02,G65SC02,g65sc02_device,GTE G65SC02,working,cpu/m6502/g65sc02.h,
 g65sc102,G65SC102,g65sc102_device,GTE G65SC102,working,cpu/m6502/g65sc02.h,
@@ -57,8 +57,8 @@ hd6301v1,HD6301V1,hd6301v1_cpu_device,Hitachi HD6301V1,needs_internal_rom,cpu/m6
 hd6301x0,HD6301X0,hd6301x0_cpu_device,Hitachi HD6301X0,needs_internal_rom,cpu/m6800/m6801.h,Requires internal ROM/RAM regions not provided by ZBC
 hd6301y0,HD6301Y0,hd6301y0_cpu_device,Hitachi HD6301Y0,needs_internal_rom,cpu/m6800/m6801.h,Requires internal ROM/RAM regions not provided by ZBC
 hd6303r,HD6303R,hd6303r_cpu_device,Hitachi HD6303R,working,cpu/m6800/m6801.h,
-hd6303x,HD6303X,hd6303x_cpu_device,Hitachi HD6303X,working,cpu/m6800/m6801.h,
-hd6303y,HD6303Y,hd6303y_cpu_device,Hitachi HD6303Y,working,cpu/m6800/m6801.h,
+hd6303x,HD6303X,hd6303x_cpu_device,Hitachi HD6303X,broken_validate,cpu/m6800/m6801.h,Test failed: Unknown error -11 (exit -11)
+hd6303y,HD6303Y,hd6303y_cpu_device,Hitachi HD6303Y,broken_validate,cpu/m6800/m6801.h,Test failed: Unknown error -11 (exit -11)
 hd6309,HD6309,hd6309_device,Hitachi HD6309,working,cpu/m6809/hd6309.h,
 hd6309e,HD6309E,hd6309e_device,Hitachi HD6309E,working,cpu/m6809/hd6309.h,
 hd63701v0,HD63701V0,hd63701v0_cpu_device,Hitachi HD63701V0,needs_internal_rom,cpu/m6800/m6801.h,Requires internal ROM/RAM regions not provided by ZBC
@@ -75,19 +75,19 @@ i80186,I80186,i80186_cpu_device,Intel 80186,working,cpu/i86/i186.h,
 i80188,I80188,i80188_cpu_device,Intel 80188,working,cpu/i86/i186.h,
 i8021,I8021,i8021_device,Intel 8021,needs_internal_rom,cpu/mcs48/mcs48.h,Requires internal ROM/RAM regions not provided by ZBC
 i8022,I8022,i8022_device,Intel 8022,needs_internal_rom,cpu/mcs48/mcs48.h,Requires internal ROM/RAM regions not provided by ZBC
-i80286,I80286,i80286_cpu_device,Intel 80286,working,cpu/i86/i286.h,
+i80286,I80286,i80286_cpu_device,Intel 80286,broken_validate,cpu/i86/i286.h,Test failed: Unknown error -9 (exit -9)
 i8031,I8031,i8031_device,Intel 8031,working,cpu/mcs51/i8051.h,
 i8032,I8032,i8032_device,Intel 8032,working,cpu/mcs51/i8052.h,
 i8035,I8035,i8035_device,Intel 8035,working,cpu/mcs48/mcs48.h,
 i8039,I8039,i8039_device,Intel 8039,working,cpu/mcs48/mcs48.h,
 i8040,I8040,i8040_device,Intel 8040,working,cpu/mcs48/mcs48.h,
-i8041a,I8041A,i8041a_device,Intel 8041A,working,cpu/mcs48/mcs48.h,
-i8041ah,I8041AH,i8041ah_device,Intel 8041AH,working,cpu/mcs48/mcs48.h,
-i8042,I8042,i8042_device,Intel 8042,working,cpu/mcs48/mcs48.h,
-i8042ah,I8042AH,i8042ah_device,Intel 8042AH,working,cpu/mcs48/mcs48.h,
-i8048,I8048,i8048_device,Intel 8048,working,cpu/mcs48/mcs48.h,
-i8049,I8049,i8049_device,Intel 8049,working,cpu/mcs48/mcs48.h,
-i8050,I8050,i8050_device,Intel 8050,working,cpu/mcs48/mcs48.h,
+i8041a,I8041A,i8041a_device,Intel 8041A,broken_validate,cpu/mcs48/mcs48.h,Test failed: Unknown error -11 (exit -11)
+i8041ah,I8041AH,i8041ah_device,Intel 8041AH,broken_validate,cpu/mcs48/mcs48.h,Test failed: Unknown error -11 (exit -11)
+i8042,I8042,i8042_device,Intel 8042,broken_validate,cpu/mcs48/mcs48.h,Test failed: Unknown error -11 (exit -11)
+i8042ah,I8042AH,i8042ah_device,Intel 8042AH,broken_validate,cpu/mcs48/mcs48.h,Test failed: Unknown error -11 (exit -11)
+i8048,I8048,i8048_device,Intel 8048,broken_validate,cpu/mcs48/mcs48.h,Test failed: Unknown error -11 (exit -11)
+i8049,I8049,i8049_device,Intel 8049,broken_validate,cpu/mcs48/mcs48.h,Test failed: Unknown error -11 (exit -11)
+i8050,I8050,i8050_device,Intel 8050,broken_validate,cpu/mcs48/mcs48.h,Test failed: Unknown error -11 (exit -11)
 i8051,I8051,i8051_device,Intel 8051,needs_internal_rom,cpu/mcs51/i8051.h,Requires internal ROM/RAM regions not provided by ZBC
 i8052,I8052,i8052_device,Intel 8052,needs_internal_rom,cpu/mcs51/i8052.h,Requires internal ROM/RAM regions not provided by ZBC
 i8080,I8080,i8080_cpu_device,Intel 8080,working,cpu/i8085/i8085.h,
@@ -95,21 +95,21 @@ i8080a,I8080A,i8080a_cpu_device,Intel 8080A,working,cpu/i8085/i8085.h,
 i8085a,I8085A,i8085a_cpu_device,Intel 8085A,working,cpu/i8085/i8085.h,
 i8086,I8086,i8086_cpu_device,Intel 8086,working,cpu/i86/i86.h,
 i8088,I8088,i8088_cpu_device,Intel 8088,working,cpu/i86/i86.h,
-i80960ka,I80960KA,i80960ka_device,Intel 80960KA,working,cpu/i960/i960.h,
-i80960kb,I80960KB,i80960kb_device,Intel 80960KB,working,cpu/i960/i960.h,
+i80960ka,I80960KA,i80960ka_device,Intel 80960KA,broken_validate,cpu/i960/i960.h,Test failed: Fatal error (exit 3)
+i80960kb,I80960KB,i80960kb_device,Intel 80960KB,broken_validate,cpu/i960/i960.h,Test failed: Fatal error (exit 3)
 i80c32,I80C32,i80c32_device,Intel 80C32,working,cpu/mcs51/i80c52.h,
 i80c51gb,I80C51GB,i80c51gb_device,Intel 80C51GB,working,cpu/mcs51/i80c52.h,
 i80c52,I80C52,i80c52_device,Intel 80C52,needs_internal_rom,cpu/mcs51/i80c52.h,Requires internal ROM/RAM regions not provided by ZBC
 i8344,I8344,i8344_device,Intel 8344AH RUPI-44,working,cpu/mcs51/i8051.h,
 i860xr,I860,i860_cpu_device,Intel i860XR,working,cpu/i860/i860.h,
-i8648,I8648,i8648_device,Intel 8648,working,cpu/mcs48/mcs48.h,
-i8741a,I8741A,i8741a_device,Intel 8741A,working,cpu/mcs48/mcs48.h,
-i8741ah,I8741AH,i8741ah_device,Intel 8741AH,working,cpu/mcs48/mcs48.h,
-i8742,I8742,i8742_device,Intel 8742,working,cpu/mcs48/mcs48.h,
-i8742ah,I8742AH,i8742ah_device,Intel 8742AH,working,cpu/mcs48/mcs48.h,
+i8648,I8648,i8648_device,Intel 8648,broken_validate,cpu/mcs48/mcs48.h,Test failed: Unknown error -11 (exit -11)
+i8741a,I8741A,i8741a_device,Intel 8741A,broken_validate,cpu/mcs48/mcs48.h,Test failed: Unknown error -11 (exit -11)
+i8741ah,I8741AH,i8741ah_device,Intel 8741AH,broken_validate,cpu/mcs48/mcs48.h,Test failed: Unknown error -11 (exit -11)
+i8742,I8742,i8742_device,Intel 8742,broken_validate,cpu/mcs48/mcs48.h,Test failed: Unknown error -11 (exit -11)
+i8742ah,I8742AH,i8742ah_device,Intel 8742AH,broken_validate,cpu/mcs48/mcs48.h,Test failed: Unknown error -11 (exit -11)
 i8744,I8744,i8744_device,Intel 8744H RUPI-44,needs_internal_rom,cpu/mcs51/i8051.h,Requires internal ROM/RAM regions not provided by ZBC
-i8748,I8748,i8748_device,Intel 8748,working,cpu/mcs48/mcs48.h,
-i8749,I8749,i8749_device,Intel 8749,working,cpu/mcs48/mcs48.h,
+i8748,I8748,i8748_device,Intel 8748,broken_validate,cpu/mcs48/mcs48.h,Test failed: Unknown error -11 (exit -11)
+i8749,I8749,i8749_device,Intel 8749,broken_validate,cpu/mcs48/mcs48.h,Test failed: Unknown error -11 (exit -11)
 i8751,I8751,i8751_device,Intel 8751,needs_internal_rom,cpu/mcs51/i8051.h,Requires internal ROM/RAM regions not provided by ZBC
 i8752,I8752,i8752_device,Intel 8752,needs_internal_rom,cpu/mcs51/i8052.h,Requires internal ROM/RAM regions not provided by ZBC
 i87c51fa,I87C51FA,i87c51fa_device,Intel 87C51FA,needs_internal_rom,cpu/mcs51/i80c52.h,Requires internal ROM/RAM regions not provided by ZBC
@@ -132,7 +132,7 @@ m4510,M4510,m4510_device,CSG 4510,working,cpu/m6502/m4510.h,
 m50740,M50740,m50740_device,Mitsubishi M50740,needs_internal_rom,cpu/m6502/m5074x.h,Requires internal ROM/RAM regions not provided by ZBC
 m50741,M50741,m50741_device,Mitsubishi M50741,needs_internal_rom,cpu/m6502/m5074x.h,Requires internal ROM/RAM regions not provided by ZBC
 m50753,M50753,m50753_device,Mitsubishi M50753,needs_internal_rom,cpu/m6502/m5074x.h,Requires internal ROM/RAM regions not provided by ZBC
-m58715,M58715,m58715_device,Mitsubishi M58715,working,cpu/mcs48/mcs48.h,
+m58715,M58715,m58715_device,Mitsubishi M58715,broken_validate,cpu/mcs48/mcs48.h,Test failed: Unknown error -11 (exit -11)
 m6502,M6502,m6502_device,MOS Technology 6502,working,cpu/m6502/m6502.h,
 m6503,M6503,m6503_device,MOS Technology 6503,working,cpu/m6502/m6503.h,
 m6504,M6504,m6504_device,MOS Technology 6504,working,cpu/m6502/m6504.h,
@@ -169,7 +169,7 @@ m7501,M7501,m7501_device,MOS Technology 7501,working,cpu/m6502/m7501.h,
 m8502,M8502,m8502_device,MOS Technology 8502,working,cpu/m6502/m8502.h,
 mb86233,MB86233,mb86233_device,Fujitsu MB86233 (TGP),working,cpu/mb86233/mb86233.h,
 mb86234,MB86234,mb86234_device,Fujitsu MB86234 (TGP),working,cpu/mb86233/mb86233.h,
-mb86235,MB86235,mb86235_device,Fujitsu MB86235 'TGPx4',working,cpu/mb86235/mb86235.h,
+mb86235,MB86235,mb86235_device,Fujitsu MB86235 'TGPx4',broken_validate,cpu/mb86235/mb86235.h,Test failed: Fatal error (exit 3)
 mb86930,MB86930,mb86930_device,Fujitsu MB86930 'SPARClite',working,cpu/sparc/sparc.h,
 mb8884,MB8884,mb8884_device,Fujitsu MB8884,working,cpu/mcs48/mcs48.h,
 mc6809,MC6809,mc6809_device,Motorola MC6809,working,cpu/m6809/m6809.h,
@@ -264,12 +264,12 @@ sa1100,SA1100,sa1100_cpu_device,Intel StrongARM SA-1100,working,cpu/arm7/arm7.h,
 sa1110,SA1110,sa1110_cpu_device,Intel StrongARM SA-1110,working,cpu/arm7/arm7.h,
 saturn_cpu,SATURN,saturn_device,Hewlett-Packard Saturn,working,cpu/saturn/saturn.h,
 sc61860,SC61860,sc61860_device,Sharp SC61860,working,cpu/sc61860/sc61860.h,
-sh3,SH3,sh3_device,Hitachi SH-3 (Unidentified),working,cpu/sh/sh4.h,
+sh3,SH3,sh3_device,Hitachi SH-3 (Unidentified),broken_validate,cpu/sh/sh4.h,Test failed: Fatal error (exit 3)
 sh4,SH4,sh4_device,Hitachi SH-4 (Unidentified),working,cpu/sh/sh4.h,
 sh7091,SH7091,sh7091_device,Hitachi SH7091,working,cpu/sh/sh4.h,
-sh7708s,SH7708S,sh7708s_device,Hitachi SH7708S,working,cpu/sh/sh4.h,
-sh7709,SH7709,sh7709_device,Hitachi SH7709,working,cpu/sh/sh4.h,
-sh7709s,SH7709S,sh7709s_device,Hitachi SH7709S,working,cpu/sh/sh4.h,
+sh7708s,SH7708S,sh7708s_device,Hitachi SH7708S,broken_validate,cpu/sh/sh4.h,Test failed: Fatal error (exit 3)
+sh7709,SH7709,sh7709_device,Hitachi SH7709,broken_validate,cpu/sh/sh4.h,Test failed: Fatal error (exit 3)
+sh7709s,SH7709S,sh7709s_device,Hitachi SH7709S,broken_validate,cpu/sh/sh4.h,Test failed: Fatal error (exit 3)
 sh7750,SH7750,sh7750_device,Hitachi SH7750,working,cpu/sh/sh4.h,
 sh7750r,SH7750R,sh7750r_device,Hitachi SH7750R,working,cpu/sh/sh4.h,
 sh7750s,SH7750S,sh7750s_device,Hitachi SH7750S,working,cpu/sh/sh4.h,
@@ -300,13 +300,13 @@ tms32016,TMS32016,tms32016_device,Texas Instruments TMS32016,working,cpu/tms3201
 tms32020,TMS32020,tms32020_device,Texas Instruments TMS32020,working,cpu/tms32025/tms32025.h,
 tms32025,TMS32025,tms32025_device,Texas Instruments TMS32025,working,cpu/tms32025/tms32025.h,
 tms32026,TMS32026,tms32026_device,Texas Instruments TMS32026,working,cpu/tms32025/tms32025.h,
-tms32030,TMS32030,tms32030_device,Texas Instruments TMS320C30,working,cpu/tms32031/tms32031.h,
-tms32031,TMS32031,tms32031_device,Texas Instruments TMS320C31,working,cpu/tms32031/tms32031.h,
-tms32032,TMS32032,tms32032_device,Texas Instruments TMS320C32,working,cpu/tms32031/tms32031.h,
-tms32033,TMS32033,tms32033_device,Texas Instruments TMS320VC33,working,cpu/tms32031/tms32031.h,
-tms32051,TMS32051,tms32051_device,Texas Instruments TMS32051,working,cpu/tms32051/tms32051.h,
-tms32053,TMS32053,tms32053_device,Texas Instruments TMS32053,working,cpu/tms32051/tms32051.h,
-tms32082_mp,TMS32082_MP,tms32082_mp_device,Texas Instruments TMS32082 MP,working,cpu/tms32082/tms32082.h,
+tms32030,TMS32030,tms32030_device,Texas Instruments TMS320C30,broken_validate,cpu/tms32031/tms32031.h,Test failed: Missing files (exit 2)
+tms32031,TMS32031,tms32031_device,Texas Instruments TMS320C31,broken_validate,cpu/tms32031/tms32031.h,Test failed: Missing files (exit 2)
+tms32032,TMS32032,tms32032_device,Texas Instruments TMS320C32,broken_validate,cpu/tms32031/tms32031.h,Test failed: Missing files (exit 2)
+tms32033,TMS32033,tms32033_device,Texas Instruments TMS320VC33,broken_validate,cpu/tms32031/tms32031.h,Test failed: Missing files (exit 2)
+tms32051,TMS32051,tms32051_device,Texas Instruments TMS32051,broken_validate,cpu/tms32051/tms32051.h,Test failed: Fatal error (exit 3)
+tms32053,TMS32053,tms32053_device,Texas Instruments TMS32053,broken_validate,cpu/tms32051/tms32051.h,Test failed: Fatal error (exit 3)
+tms32082_mp,TMS32082_MP,tms32082_mp_device,Texas Instruments TMS32082 MP,broken_validate,cpu/tms32082/tms32082.h,Test failed: Fatal error (exit 3)
 tms32082_pp,TMS32082_PP,tms32082_pp_device,Texas Instruments TMS32082 PP,working,cpu/tms32082/tms32082.h,
 tms34010,TMS34010,tms34010_device,Texas Instruments TMS34010,working,cpu/tms34010/tms34010.h,
 tms34020,TMS34020,tms34020_device,Texas Instruments TMS34020,working,cpu/tms34010/tms34010.h,
@@ -333,12 +333,12 @@ tx0_8kwo_cpu,TX0_8KW_OLD,tx0_8kwo_device,MIT Lincoln Laboratory TX-0 8KW (old),d
 tx4925be,TX4925BE,tx4925be_device,Toshiba TX4925 (big),working,cpu/mips/mips3.h,
 tx4925le,TX4925LE,tx4925le_device,Toshiba TX4925 (little),working,cpu/mips/mips3.h,
 ub8830d,UB8830D,ub8830d_device,UB8830D,needs_internal_rom,cpu/z8/z8.h,Requires internal ROM/RAM regions not provided by ZBC
-unsp,UNSP,unsp_device,SunPlus u'nSP (ISA 1.0),working,cpu/unsp/unsp.h,
-unsp_11,UNSP_11,unsp_11_device,SunPlus u'nSP (ISA 1.1),working,cpu/unsp/unsp.h,
-unsp_12,UNSP_12,unsp_12_device,SunPlus u'nSP (ISA 1.2),working,cpu/unsp/unsp.h,
-unsp_20,UNSP_20,unsp_20_device,SunPlus u'nSP (ISA 2.0),working,cpu/unsp/unsp.h,
+unsp,UNSP,unsp_device,SunPlus u'nSP (ISA 1.0),broken_validate,cpu/unsp/unsp.h,Test failed: Unknown error -9 (exit -9)
+unsp_11,UNSP_11,unsp_11_device,SunPlus u'nSP (ISA 1.1),broken_validate,cpu/unsp/unsp.h,Test failed: Unknown error -9 (exit -9)
+unsp_12,UNSP_12,unsp_12_device,SunPlus u'nSP (ISA 1.2),broken_validate,cpu/unsp/unsp.h,Test failed: Unknown error -9 (exit -9)
+unsp_20,UNSP_20,unsp_20_device,SunPlus u'nSP (ISA 2.0),broken_validate,cpu/unsp/unsp.h,Test failed: Unknown error -9 (exit -9)
 upd7725,UPD7725,upd7725_device,NEC uPD7725,working,cpu/upd7725/upd7725.h,
-upd7751,UPD7751,upd7751_device,NEC uPD7751,working,cpu/mcs48/mcs48.h,
+upd7751,UPD7751,upd7751_device,NEC uPD7751,broken_validate,cpu/mcs48/mcs48.h,Test failed: Unknown error -11 (exit -11)
 upd7801,UPD7801,upd7801_device,NEC uPD7801,working,cpu/upd7810/upd7810.h,
 upd7807,UPD7807,upd7807_device,NEC uPD7807,working,cpu/upd7810/upd7810.h,
 upd7810,UPD7810,upd7810_device,NEC uPD7810,working,cpu/upd7810/upd7810.h,
@@ -360,8 +360,8 @@ v50,V50,v50_device,NEC V50,working,cpu/nec/v5x.h,
 v53,V53,v53_device,NEC V53,working,cpu/nec/v5x.h,
 v53a,V53A,v53a_device,NEC V53A,working,cpu/nec/v5x.h,
 v5x_dmau,V5X_DMAU,v5x_dmau_device,V5X DMAU,not_cpu,,DMA unit
-v60,V60,v60_device,NEC V60,working,cpu/v60/v60.h,
-v70,V70,v70_device,NEC V70,working,cpu/v60/v60.h,
+v60,V60,v60_device,NEC V60,broken_validate,cpu/v60/v60.h,Test failed: Fatal error (exit 3)
+v70,V70,v70_device,NEC V70,broken_validate,cpu/v60/v60.h,Test failed: Fatal error (exit 3)
 v810,V810,v810_device,NEC V810,working,cpu/v810/v810.h,
 vr4300be,VR4300BE,vr4300be_device,NEC VR4300 (big),working,cpu/mips/mips3.h,
 vr4300le,VR4300LE,vr4300le_device,NEC VR4300 (little),working,cpu/mips/mips3.h,
@@ -385,8 +385,8 @@ z80180,Z80180,z80180_device,Zilog Z80180,working,cpu/z180/z180.h,
 z80182,Z80182,z80182_device,Zilog Z80182,working,cpu/z180/z180.h,
 z8601,Z8601,z8601_device,Zilog Z8601,needs_internal_rom,cpu/z8/z8.h,Requires internal ROM/RAM regions not provided by ZBC
 z8611,Z8611,z8611_device,Zilog Z8611,needs_internal_rom,cpu/z8/z8.h,Requires internal ROM/RAM regions not provided by ZBC
-z8671,Z8671,z8671_device,Zilog Z8671,working,cpu/z8/z8.h,
+z8671,Z8671,z8671_device,Zilog Z8671,broken_validate,cpu/z8/z8.h,Test failed: Missing files (exit 2)
 z8681,Z8681,z8681_device,Zilog Z8681,working,cpu/z8/z8.h,
-z8682,Z8682,z8682_device,Zilog Z8682,working,cpu/z8/z8.h,
+z8682,Z8682,z8682_device,Zilog Z8682,broken_validate,cpu/z8/z8.h,Test failed: Missing files (exit 2)
 z86e02,Z86E02,z86e02_device,Zilog Z86E02,needs_internal_rom,cpu/z8/z8.h,Requires internal ROM/RAM regions not provided by ZBC
 z8s180,Z8S180,z8s180_device,Zilog Z8S180,working,cpu/z180/z180.h,
