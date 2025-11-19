@@ -32,11 +32,16 @@ from collections import defaultdict
 STATUS_WORKING = "working"
 STATUS_BROKEN_COMPILE = "broken_compile"
 STATUS_BROKEN_VALIDATE = "broken_validate"
+STATUS_BROKEN_HEADER = "broken_header"
 STATUS_DISABLED = "disabled"
+STATUS_NOT_CPU = "not_cpu"
+STATUS_NEEDS_INTERNAL_ROM = "needs_internal_rom"
+STATUS_NEEDS_DEPENDENT_DEVICE = "needs_dependent_device"
 STATUS_UNKNOWN = "unknown"
 
 ALL_STATUSES = [STATUS_WORKING, STATUS_BROKEN_COMPILE, STATUS_BROKEN_VALIDATE,
-                STATUS_DISABLED, STATUS_UNKNOWN]
+                STATUS_BROKEN_HEADER, STATUS_DISABLED, STATUS_NOT_CPU,
+                STATUS_NEEDS_INTERNAL_ROM, STATUS_NEEDS_DEPENDENT_DEVICE, STATUS_UNKNOWN]
 
 
 class CPUInfo:
@@ -79,6 +84,47 @@ class ZBCGenerator:
     def __init__(self, csv_path: str = "src/mame/zbc/zbc_status.csv"):
         self.csv_path = Path(csv_path)
         self.cpus: Dict[str, CPUInfo] = {}
+        self.device_type_mapping: Dict[str, str] = {}  # TYPE_CONSTANT -> header_path
+
+    def build_device_type_mapping(self) -> Dict[str, str]:
+        """
+        Scan all CPU header files and build mapping from DECLARE_DEVICE_TYPE to header paths.
+        Loads ALL headers into memory once, then searches in-memory for efficiency.
+        Returns: Dict[TYPE_CONSTANT, header_path]
+        """
+        cpu_root = Path("src/devices/cpu")
+        if not cpu_root.exists():
+            print(f"Warning: {cpu_root} not found, cannot build device type mapping")
+            return {}
+
+        # Step 1: Load ALL header files into memory at once (~6.3 MB total)
+        print(f"Loading all CPU headers into memory...")
+        headers: Dict[Path, str] = {}
+        for path in cpu_root.rglob("*.h"):
+            try:
+                headers[path] = path.read_text(encoding='utf-8', errors='ignore')
+            except Exception as e:
+                print(f"  Warning: Could not read {path}: {e}")
+
+        print(f"Loaded {len(headers)} header files into memory")
+
+        # Step 2: Search ALL files in memory for DECLARE_DEVICE_TYPE
+        pattern = re.compile(r'DECLARE_DEVICE_TYPE\s*\(\s*(\w+)\s*,')
+        mapping: Dict[str, str] = {}
+
+        for path, content in headers.items():
+            for match in pattern.finditer(content):
+                type_constant = match.group(1)
+                try:
+                    rel_path = path.relative_to("src/devices")
+                    mapping[type_constant] = str(rel_path)
+                except ValueError:
+                    # Path not relative to src/devices, use absolute
+                    mapping[type_constant] = str(path)
+
+        print(f"Found {len(mapping)} DECLARE_DEVICE_TYPE declarations")
+        self.device_type_mapping = mapping
+        return mapping
 
     def load_csv(self) -> bool:
         """Load CPU database from CSV file. Returns True if loaded, False if not found."""
@@ -168,10 +214,16 @@ class ZBCGenerator:
                 cpu.header_file = self.infer_header_file(cpu)
                 updated += 1
             else:
-                # NEW: Add as unknown
-                cpu = CPUInfo(shortname, type_const, class_name, fullname,
-                             STATUS_UNKNOWN, "", "")
-                cpu.header_file = self.infer_header_file(cpu)
+                # NEW: Infer header and set appropriate initial status
+                header_file = self.infer_header_file(CPUInfo(shortname, type_const, class_name, fullname, "", "", ""))
+                if not header_file:
+                    # Header not found in mapping - mark as broken_header
+                    status = STATUS_BROKEN_HEADER
+                else:
+                    # Header found - mark as working (will be validated later)
+                    status = STATUS_WORKING
+
+                cpu = CPUInfo(shortname, type_const, class_name, fullname, status, header_file, "")
                 self.cpus[shortname] = cpu
                 added += 1
 
@@ -181,20 +233,20 @@ class ZBCGenerator:
             print(f"Created new database with {added} CPUs")
 
     def infer_header_file(self, cpu: CPUInfo) -> str:
-        """Infer header file path from class name - simple default pattern only"""
-        if not cpu.class_name:
+        """Infer header file path by looking up type constant in scanned device type mapping"""
+        if not cpu.type_constant:
             return ""
 
-        # Remove _device and _cpu suffixes to get base name
-        base_name = cpu.class_name
-        if base_name.endswith('_device'):
-            base_name = base_name[:-len('_device')]
-        if base_name.endswith('_cpu'):
-            base_name = base_name[:-len('_cpu')]
+        # Build mapping on first use
+        if not self.device_type_mapping:
+            self.build_device_type_mapping()
 
-        # Simple default: cpu/<base_name>/<base_name>.h
-        # If this is wrong, it will be caught by validation and must be fixed manually in CSV
-        return f"cpu/{base_name}/{base_name}.h"
+        # Look up the actual header path from scanned DECLARE_DEVICE_TYPE declarations
+        if cpu.type_constant in self.device_type_mapping:
+            return self.device_type_mapping[cpu.type_constant]
+
+        # Fallback: if not found in mapping, return empty (will be caught by validation)
+        return ""
 
     def mark_broken_compile(self, build_log: str) -> None:
         """Parse build error log and mark broken CPUs as broken_compile"""
@@ -276,7 +328,7 @@ class ZBCGenerator:
 
         return False
 
-    def generate_hpp(self, output_path: str = "src/mame/zbc/zbcgen.hpp") -> None:
+    def generate_hpp(self, output_path: str = "src/mame/zbc/zbcgen.hpp") -> List[CPUInfo]:
         """Generate zbcgen.hpp with all CPU header includes"""
         output_file = Path(output_path)
         output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -413,13 +465,19 @@ class ZBCGenerator:
         if cpus_with_missing_headers:
             print(f"  ({len(cpus_with_missing_headers)} CPUs excluded due to missing headers)")
 
-    def update_mame_lst(self, lst_path: str = "src/mame/mame.lst") -> None:
-        """Update mame.lst with current working CPUs"""
+    def update_mame_lst(self, lst_path: str = "src/mame/mame.lst", cpus_with_valid_headers: list = None) -> None:
+        """Update mame.lst with only CPUs that have valid headers"""
         lst_file = Path(lst_path)
 
         if not lst_file.exists():
             print(f"Warning: {lst_file} not found, skipping mame.lst update")
             return
+
+        # Build set of CPUs with invalid headers
+        if cpus_with_valid_headers is not None:
+            valid_shortnames = {cpu.shortname for cpu in cpus_with_valid_headers}
+        else:
+            valid_shortnames = set()
 
         # Read entire file
         with open(lst_file, 'r', encoding='utf-8') as f:
@@ -443,9 +501,12 @@ class ZBCGenerator:
         if end_idx is None:
             end_idx = len(lines)
 
-        # Generate new zbc section
-        working_cpus = sorted([c for c in self.cpus.values() if c.status == STATUS_WORKING],
-                             key=lambda c: c.shortname)
+        # Generate new zbc section - only include CPUs with valid headers
+        if cpus_with_valid_headers is not None:
+            working_cpus = sorted(cpus_with_valid_headers, key=lambda c: c.shortname)
+        else:
+            working_cpus = sorted([c for c in self.cpus.values() if c.status == STATUS_WORKING],
+                                 key=lambda c: c.shortname)
 
         new_lines = ["@source:zbc/zbc.cpp\n"]
         for cpu in working_cpus:
@@ -555,7 +616,12 @@ For detailed documentation, see docs/source/techspecs/zbc.rst
 
         cpus_with_missing_headers = gen.generate_hpp()
         gen.generate_ipp(cpus_with_missing_headers=cpus_with_missing_headers)
-        gen.update_mame_lst()
+
+        # Calculate which CPUs have valid headers (working minus missing)
+        missing_shortnames = {cpu.shortname for cpu in cpus_with_missing_headers}
+        cpus_with_valid_headers = [c for c in gen.cpus.values()
+                                   if c.status == STATUS_WORKING and c.shortname not in missing_shortnames]
+        gen.update_mame_lst(cpus_with_valid_headers=cpus_with_valid_headers)
 
     if not any([args.scan_mame, args.mark_broken_compile, args.mark_broken_validate, args.build]):
         parser.print_help()
