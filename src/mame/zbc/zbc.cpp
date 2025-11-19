@@ -724,7 +724,6 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
 
 	center_line("Zero board computer");
 	center_line(m_maincpu->name());
-	center_line("");
 	center_line("www.zeroboardcomputer.com");
 	center_line("");
 
