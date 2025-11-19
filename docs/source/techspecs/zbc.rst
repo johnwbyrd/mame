@@ -163,7 +163,7 @@ The ``zbcgen.py`` script supports multiple operation modes:
 **Initial Generation**::
 
     ./mame -listcpu > /tmp/cpus.txt
-    zbcgen.py --generate /tmp/cpus.txt
+    zbcgen.py --scan-mame /tmp/cpus.txt
 
 Creates initial ``zbc_status.csv`` with all CPUs marked as ``unknown``, then
 generates ``zbcgen.hpp`` and ``zbcgen.cpp``.
@@ -171,20 +171,20 @@ generates ``zbcgen.hpp`` and ``zbcgen.cpp``.
 **Update from Build Errors**::
 
     make 2>&1 | tee /tmp/build.log
-    zbcgen.py --update-build /tmp/build.log
+    zbcgen.py --mark-broken-compile /tmp/build.log
 
 Parses compilation errors and marks failing CPUs as ``broken_compile`` in CSV.
 
 **Update from Validation Errors**::
 
     ./mame -validate 2>&1 | tee /tmp/validate.log
-    zbcgen.py --update-validate /tmp/validate.log
+    zbcgen.py --mark-broken-validate /tmp/validate.log
 
 Parses validation errors and marks failing CPUs as ``broken_validate`` in CSV.
 
 **Regenerate Output Files**::
 
-    zbcgen.py --regenerate
+    zbcgen.py --build
 
 Regenerates ``zbcgen.hpp`` and ``zbcgen.cpp`` from current CSV state without
 changing status values.
@@ -196,22 +196,22 @@ Typical iterative workflow::
 
     # 1. Generate fresh list from MAME (or edit CSV manually)
     ./mame -listcpu > /tmp/cpus.txt
-    zbcgen.py --generate /tmp/cpus.txt
+    zbcgen.py --scan-mame /tmp/cpus.txt
 
     # 3. Build and capture errors
     make 2>&1 | tee /tmp/build.log
-    zbcgen.py --update-build /tmp/build.log
-    zbcgen.py --regenerate
+    zbcgen.py --mark-broken-compile /tmp/build.log
+    zbcgen.py --build
 
     # 4. Rebuild with broken CPUs excluded
     make 2>&1 | tee /tmp/build2.log
-    zbcgen.py --update-build /tmp/build2.log
-    zbcgen.py --regenerate
+    zbcgen.py --mark-broken-compile /tmp/build2.log
+    zbcgen.py --build
 
     # 5. Validate working CPUs
     ./mame -validate 2>&1 | tee /tmp/validate.log
-    zbcgen.py --update-validate /tmp/validate.log
-    zbcgen.py --regenerate
+    zbcgen.py --mark-broken-validate /tmp/validate.log
+    zbcgen.py --build
 
     # 6. Final build
     make
@@ -352,22 +352,19 @@ Format:
 The zbcgen system integrates into MAME's build system::
 
     # Makefile additions:
-    zbcgen-extract:
-        @python3 scripts/build/zbcgen.py --extract-current
-
-    zbcgen-generate:
+    zbcgen-scan:
         @./mame -listcpu > /tmp/cpus.txt
-        @python3 scripts/build/zbcgen.py --generate /tmp/cpus.txt
+        @python3 scripts/build/zbcgen.py --scan-mame /tmp/cpus.txt
 
-    zbcgen-update-build:
-        @python3 scripts/build/zbcgen.py --update-build $(BUILD_LOG)
+    zbcgen-mark-broken-compile:
+        @python3 scripts/build/zbcgen.py --mark-broken-compile $(BUILD_LOG)
 
-    zbcgen-update-validate:
+    zbcgen-mark-broken-validate:
         @./mame -validate 2>&1 | tee /tmp/validate.log
-        @python3 scripts/build/zbcgen.py --update-validate /tmp/validate.log
+        @python3 scripts/build/zbcgen.py --mark-broken-validate /tmp/validate.log
 
-    zbcgen-regenerate:
-        @python3 scripts/build/zbcgen.py --regenerate
+    zbcgen-build:
+        @python3 scripts/build/zbcgen.py --build
 
 6.2 Continuous Integration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
