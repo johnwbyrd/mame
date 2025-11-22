@@ -76,6 +76,7 @@ class zbc_state : public driver_device {
 	zbc_state(const machine_config &mconfig, device_type type, const char *tag)
 	    : driver_device(mconfig, type, tag), m_maincpu(*this, "maincpu"),
 	      m_vdg(*this, "vdg"),
+	      m_quickload(*this, "quickload"),
 	      m_videoram(*this, "videoram", 0x200, ENDIANNESS_LITTLE) {}
 
 	template <typename DEVICE_TYPE>
@@ -88,6 +89,7 @@ class zbc_state : public driver_device {
   private:
 	required_device<cpu_device> m_maincpu;
 	required_device<mc6847_base_device> m_vdg;
+	optional_device<quickload_image_device> m_quickload;
 
 	// Video RAM must be accessible as bytes regardless of CPU bus width.
 	// memory_share_creator ensures 8-bit access even on 16/32-bit CPUs,
@@ -192,12 +194,18 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::mem_map(
 	map.unmap_value_high(); // Unmapped reads return 0xFF (floating bus)
 
 	// Early exit: Check if CPU has program space
-	if (!m_maincpu || !m_maincpu->has_space(AS_PROGRAM))
+	if (!m_maincpu || !m_maincpu->has_space(AS_PROGRAM)) {
+		osd_printf_error("ZBC mem_map: CPU '%s' has no AS_PROGRAM space, skipping memory setup\n",
+		                 m_maincpu ? m_maincpu->name() : "null");
 		return;
+	}
 
 	// Skip CPUs with self-managed RAM devices (psxcpu, Emotion Engine, etc.)
-	if (m_maincpu->subdevice("ram") != nullptr)
+	if (m_maincpu->subdevice("ram") != nullptr) {
+		osd_printf_error("ZBC mem_map: CPU '%s' has self-managed RAM device, skipping memory setup\n",
+		                 m_maincpu->name());
 		return;
+	}
 
 	// Skip CPUs with internal ROM/RAM (PICs, AVR, 8051, etc.)
 	device_memory_interface *memory_interface;
@@ -205,6 +213,8 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::mem_map(
 		const address_space_config *prog_config = memory_interface->space_config(AS_PROGRAM);
 		if (prog_config && !prog_config->m_internal_map.isnull()) {
 			// CPU has internal ROM/RAM, let it manage memory
+			osd_printf_error("ZBC mem_map: CPU '%s' has internal ROM/RAM map, skipping memory setup\n",
+			                 m_maincpu->name());
 			return;
 		}
 
@@ -213,6 +223,8 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::mem_map(
 			const address_space_config *data_config = memory_interface->space_config(AS_DATA);
 			if (data_config && !data_config->m_internal_map.isnull()) {
 				// CPU has internal data memory
+				osd_printf_error("ZBC mem_map: CPU '%s' has internal data memory, skipping memory setup\n",
+				                 m_maincpu->name());
 				return;
 			}
 		}
@@ -234,6 +246,9 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::mem_map(
 
 	if ((addr_mask + 1) < min_required) {
 		// Address space too small for peripherals, just map all as RAM
+		osd_printf_error("ZBC mem_map: CPU '%s' address space too small (0x%X < 0x%llX), mapping all as RAM\n",
+		                 m_maincpu->name(), (unsigned int)(addr_mask + 1), (unsigned long long)min_required);
+		// Note: map().ram() call is protected by has_space() check at function entry
 		map(0x0000, addr_mask).ram();
 		return;
 	}
@@ -244,6 +259,7 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::mem_map(
 	// Map RAM from load address to just before semihosting
 	// This leaves room for both semihosting and video RAM at top
 	if (ram_end > LOAD_ADDR && ram_end <= addr_mask) {
+		// Note: map().ram() call is protected by has_space() check at function entry
 		map(LOAD_ADDR, ram_end).ram();
 	}
 
@@ -413,12 +429,36 @@ template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
           uint32_t VRAM_ADDR>
 void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_start() {
 	// Install 8-bit video RAM at the calculated address.
-	// CRITICAL: Must use install_ram() here (not map().ram() in mem_map())
+	// CRITICAL: Must use install_ram()/install_rom() here (not map().ram() in mem_map())
 	// to force byte-granular access on 16/32-bit CPUs. The MC6847 VDG
 	// always reads bytes, but map().ram() creates CPU-width memory.
+	//
+	// VRAM Write Protection: When no quickload is present, install VRAM as read-only
+	// to prevent errant CPU writes from corrupting the boot message display.
+	// When quickload is loaded, install as full R/W RAM so programs can use the display.
+
+	// Check if CPU has program address space
+	if (!m_maincpu || !m_maincpu->has_space(AS_PROGRAM)) {
+		osd_printf_error("ZBC machine_start: CPU '%s' has no AS_PROGRAM space, cannot install VRAM\n",
+		                 m_maincpu ? m_maincpu->name() : "null");
+		return;
+	}
+
 	uint32_t vram_addr = get_vram_addr();
-	m_maincpu->space(AS_PROGRAM)
-	    .install_ram(vram_addr, vram_addr + 0x1FF, m_videoram.target());
+	auto &space = m_maincpu->space(AS_PROGRAM);
+
+	if (m_quickload && m_quickload->exists()) {
+		// Quickload image loaded: Install as full read/write RAM
+		// This allows the loaded program to use VRAM for graphics/text output
+		osd_printf_verbose("ZBC: Installing VRAM as R/W RAM (quickload detected)\n");
+		space.install_ram(vram_addr, vram_addr + 0x1FF, m_videoram.target());
+	} else {
+		// No quickload: Install as read-only to prevent display corruption
+		// The boot message will be protected from errant CPU writes
+		// Note: init_screen() can still write via m_videoram[] directly
+		osd_printf_verbose("ZBC: Installing VRAM as ROM (no quickload)\n");
+		space.install_rom(vram_addr, vram_addr + 0x1FF, m_videoram.target());
+	}
 }
 
 // CPU-specific idle initialization using template specialization.
@@ -434,58 +474,17 @@ void init_cpu_for_idle(address_space &space) {
 	// Default: no special initialization needed for CPUs without specialization
 }
 
-// 6502 specialization: Set reset vector and create idle loop
-template <> void init_cpu_for_idle<m6502_device, 0x0200>(address_space &space) {
-	// 6502 reads reset vector from 0xFFFC-0xFFFD (little-endian)
-	space.write_byte(0xfffc, 0x00);
-	space.write_byte(0xfffd, 0x02); // Points to 0x0200
-
-	// Idle loop at load address: JMP $0200 (infinite loop)
-	space.write_byte(0x0200, 0x4c); // JMP absolute opcode
-	space.write_byte(0x0201, 0x00);
-	space.write_byte(0x0202, 0x02);
-}
-
-// Z80 specialization: Boot code and NMI handler
-template <> void init_cpu_for_idle<z80_device, 0x0200>(address_space &space) {
-	// Z80 starts at 0x0000 on reset, jump to load address
-	space.write_byte(0x0000, 0xc3); // JP opcode
-	space.write_byte(0x0001, 0x00);
-	space.write_byte(0x0002, 0x02); // JP $0200
-
-	// NMI handler at 0x0066 (MC6847 vsync generates NMI)
-	space.write_byte(0x0066, 0xed); // RETN opcode
-	space.write_byte(0x0067, 0x45); // (2-byte instruction)
-
-	// Idle loop: JR -2 (relative jump to self)
-	space.write_byte(0x0200, 0x18); // JR opcode
-	space.write_byte(0x0201, 0xfe); // Offset -2
-}
-
-// 68000 specialization: Exception vectors and idle loop
-template <>
-void init_cpu_for_idle<m68000_device, 0x0200>(address_space &space) {
-	// 68000 reads initial SP from 0x0000-0x0003 (big-endian)
-	space.write_byte(0x0000, 0x00);
-	space.write_byte(0x0001, 0x00);
-	space.write_byte(0x0002, 0xFF);
-	space.write_byte(0x0003, 0xF0); // SP = 0x0000FFF0
-
-	// 68000 reads initial PC from 0x0004-0x0007 (big-endian)
-	space.write_byte(0x0004, 0x00);
-	space.write_byte(0x0005, 0x00);
-	space.write_byte(0x0006, 0x02);
-	space.write_byte(0x0007, 0x00); // PC = 0x00000200
-
-	// Idle loop: BRA.S -2 (branch to self)
-	space.write_byte(0x0200, 0x60); // BRA.S opcode
-	space.write_byte(0x0201, 0xfe); // Displacement -2
-}
-
 template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
           uint32_t VRAM_ADDR>
 void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_reset() {
 	init_screen();
+
+	// Check if CPU has program address space before initializing
+	if (!m_maincpu || !m_maincpu->has_space(AS_PROGRAM)) {
+		osd_printf_error("ZBC machine_reset: CPU '%s' has no AS_PROGRAM space, cannot initialize CPU for idle\n",
+		                 m_maincpu ? m_maincpu->name() : "null");
+		return;
+	}
 
 	address_space &space = m_maincpu->space(AS_PROGRAM);
 
@@ -501,6 +500,14 @@ template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
 std::pair<std::error_condition, std::string>
 zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::quickload_cb(
     snapshot_image_device &image) {
+	// Check if CPU has program address space before loading
+	if (!m_maincpu || !m_maincpu->has_space(AS_PROGRAM)) {
+		osd_printf_error("ZBC quickload_cb: CPU '%s' has no AS_PROGRAM space, cannot load program\n",
+		                 m_maincpu ? m_maincpu->name() : "null");
+		return std::make_pair(image_error::UNSPECIFIED,
+		                      "CPU has no program address space");
+	}
+
 	uint32_t size = image.length();
 	uint32_t vram_addr = get_vram_addr();
 
