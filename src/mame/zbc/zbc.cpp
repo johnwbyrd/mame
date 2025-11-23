@@ -47,12 +47,13 @@
 #include "zbcgen.hpp"
 
 #include "imagedev/snapquik.h"
-#include "video/mc6847.h"
 #include "m6847drv.h"
+#include "video/mc6847.h"
 
 namespace {
 
-// Template parameters control compile-time instantiation of CPU-specific variants:
+// Template parameters control compile-time instantiation of CPU-specific
+// variants:
 //
 // - CPU_TYPE: The CPU device class (e.g., m6502_device, z80_device)
 //   Must be a cpu_device subclass. Used for template specialization matching
@@ -76,8 +77,7 @@ class zbc_state : public driver_device {
   public:
 	zbc_state(const machine_config &mconfig, device_type type, const char *tag)
 	    : driver_device(mconfig, type, tag), m_maincpu(*this, "maincpu"),
-	      m_vdg(*this, "vdg"),
-	      m_quickload(*this, "quickload"),
+	      m_vdg(*this, "vdg"), m_quickload(*this, "quickload"),
 	      m_videoram(*this, "videoram", 0x200, ENDIANNESS_LITTLE) {}
 
 	template <typename DEVICE_TYPE>
@@ -95,11 +95,13 @@ class zbc_state : public driver_device {
 	// Video RAM must be accessible as bytes regardless of CPU bus width.
 	// memory_share_creator ensures 8-bit access even on 16/32-bit CPUs,
 	// allowing the MC6847 VDG to read character data byte-by-byte.
-	// Installed in machine_start() using install_ram() to force byte granularity.
+	// Installed in machine_start() using install_ram() to force byte
+	// granularity.
 	memory_share_creator<uint8_t> m_videoram;
 
 	// Memory region sizes - avoid magic numbers throughout code
-	static constexpr offs_t VRAM_SIZE = 512;      // MC6847 VDG 32x16 text mode requires 512 bytes
+	static constexpr offs_t VRAM_SIZE =
+	    512; // MC6847 VDG 32x16 text mode requires 512 bytes
 
 	// VSync interrupt configuration (JP1 jumper)
 	bool m_vsync_interrupt_enabled = false;
@@ -131,7 +133,8 @@ class zbc_state : public driver_device {
 	//   24-bit (16MB):  VRAM at 0xFFEE00 (leaves 4KB + VRAM at top)
 	//   32-bit (4GB):   VRAM at 0xFFFEFE00 (leaves 64KB + VRAM at top)
 	//
-	// MUST be called only when address space exists (machine_start(), not mem_map()).
+	// MUST be called only when address space exists (machine_start(), not
+	// mem_map()).
 	offs_t get_vram_addr() const {
 		if (VRAM_ADDR != 0)
 			return VRAM_ADDR; // Template parameter override
@@ -172,15 +175,17 @@ template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
           uint32_t VRAM_ADDR>
 void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::mem_map(
     address_map &map) {
-	map.unmap_value_high(); // Unmapped reads return 0xFF (floating bus behavior)
+	map.unmap_value_high(); // Unmapped reads return 0xFF (floating bus
+	                        // behavior)
 
 	// Calculate the CPU's address mask based on its address width
 	const address_space_config &config = map.get_config();
 	offs_t addr_mask = (1ULL << config.addr_width()) - 1;
 
 	// Map entire address space as RAM
-	// VRAM will be installed over this in machine_start() with specific backing storage
-	map(0x0000, addr_mask).ram();
+	// VRAM will be installed over this in machine_start() with specific backing
+	// storage
+	map(0, addr_mask).ram();
 }
 
 template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
@@ -194,7 +199,8 @@ uint8_t zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::vdg_videoram_r(
 
 template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
           uint32_t VRAM_ADDR>
-void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::vdg_fsync(int state) {
+void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::vdg_fsync(
+    int state) {
 	// MC6847 field sync callback - fires at ~60Hz (PAL: ~62Hz)
 	// Only trigger interrupt on rising edge (0 -> 1 transition) if enabled
 	if (!state || !m_vsync_interrupt_enabled)
@@ -220,7 +226,8 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
 	// Calculate total RAM available for programs (everything before VRAM)
 	uint64_t available_ram = vram_addr - LOAD_ADDR;
 
-	snprintf(addr_buf, sizeof(addr_buf), "Load address: 0x%llX", (unsigned long long)LOAD_ADDR);
+	snprintf(addr_buf, sizeof(addr_buf), "Load address: 0x%llX",
+	         (unsigned long long)LOAD_ADDR);
 	m_console.center_line(addr_buf);
 
 	snprintf(addr_buf, sizeof(addr_buf), "Available RAM: %llu bytes",
@@ -228,7 +235,8 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
 	m_console.center_line(addr_buf);
 
 	snprintf(addr_buf, sizeof(addr_buf), "Video RAM: 0x%llX-0x%llX",
-	         (unsigned long long)vram_addr, (unsigned long long)(vram_addr + VRAM_SIZE - 1));
+	         (unsigned long long)vram_addr,
+	         (unsigned long long)(vram_addr + VRAM_SIZE - 1));
 	m_console.center_line(addr_buf);
 
 	m_console.center_line("");
@@ -237,7 +245,7 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
 	std::string intro = "This system has " + ram_size_str +
 	                    " of RAM and a MC6847 video display. "
 	                    "Load and execute a headerless binary in MAME "
-						"by using the -quik option. "
+	                    "by using the -quik option. "
 	                    "Happy coding!";
 	m_console.print_sentence(intro.c_str());
 }
@@ -246,8 +254,9 @@ template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
           uint32_t VRAM_ADDR>
 void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_start() {
 	// RUNTIME MEMORY INSTALLATION:
-	// NOW devices have started and address spaces exist. We can query CPU properties
-	// and install memory dynamically based on the actual hardware capabilities.
+	// NOW devices have started and address spaces exist. We can query CPU
+	// properties and install memory dynamically based on the actual hardware
+	// capabilities.
 
 	// === Validation: Check CPU has program space ===
 	if (!m_maincpu) {
@@ -256,13 +265,17 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_start() {
 	}
 
 	if (!m_maincpu->has_space(AS_PROGRAM)) {
-		osd_printf_error("ZBC machine_start: CPU '%s' has no AS_PROGRAM space\n",
-		                 m_maincpu->name());
+		osd_printf_error(
+		    "ZBC machine_start: CPU '%s' has no AS_PROGRAM space\n",
+		    m_maincpu->name());
 		osd_printf_error("  Possible reasons:\n");
-		osd_printf_error("    - CPU has internal memory management (not compatible with ZBC)\n");
-		osd_printf_error("    - Harvard architecture with separate program/data spaces\n");
+		osd_printf_error("    - CPU has internal memory management (not "
+		                 "compatible with ZBC)\n");
+		osd_printf_error(
+		    "    - Harvard architecture with separate program/data spaces\n");
 		osd_printf_error("    - Device is not actually a CPU\n");
-		osd_printf_error("  Action: Mark as 'disabled' or 'not_cpu' in zbc_status.csv\n");
+		osd_printf_error(
+		    "  Action: Mark as 'disabled' or 'not_cpu' in zbc_status.csv\n");
 		return;
 	}
 
@@ -282,8 +295,9 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_start() {
 	const offs_t min_required = min_program + VRAM_SIZE;
 
 	if (addr_space_size < min_required) {
-		osd_printf_error("ZBC machine_start: CPU '%s' address space too small\n",
-		                 m_maincpu->name());
+		osd_printf_error(
+		    "ZBC machine_start: CPU '%s' address space too small\n",
+		    m_maincpu->name());
 		osd_printf_error("  Address space: %s (%d-bit)\n",
 		                 format_ram_size(addr_space_size).c_str(), addr_bits);
 		osd_printf_error("  Minimum required: %s\n",
@@ -293,41 +307,39 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_start() {
 	}
 
 	// === Install VRAM over the generic RAM from mem_map() ===
-	// CRITICAL: Must use install_ram()/install_rom() to force byte-granular access
-	// on 16/32-bit CPUs. The MC6847 VDG always reads bytes, but map().ram() creates
-	// CPU-width memory which would cause access issues.
+	// CRITICAL: Must use install_ram()/install_rom() to force byte-granular
+	// access on 16/32-bit CPUs. The MC6847 VDG always reads bytes, but
+	// map().ram() creates CPU-width memory which would cause access issues.
 	if (m_quickload && m_quickload->exists()) {
 		osd_printf_verbose("ZBC: Installing VRAM as R/W (quickload present)\n");
-		osd_printf_verbose("  Range: %s - %s\n",
-		                   format_addr(vram_addr).c_str(),
+		osd_printf_verbose("  Range: %s - %s\n", format_addr(vram_addr).c_str(),
 		                   format_addr(vram_end).c_str());
 		space.install_ram(vram_addr, vram_end, m_videoram.target());
 	} else {
-		osd_printf_verbose("ZBC: Installing VRAM as ROM (boot message protected)\n");
-		osd_printf_verbose("  Range: %s - %s\n",
-		                   format_addr(vram_addr).c_str(),
+		osd_printf_verbose(
+		    "ZBC: Installing VRAM as ROM (boot message protected)\n");
+		osd_printf_verbose("  Range: %s - %s\n", format_addr(vram_addr).c_str(),
 		                   format_addr(vram_end).c_str());
 		space.install_rom(vram_addr, vram_end, m_videoram.target());
 	}
 
 	// === Log complete memory map for debugging ===
-	osd_printf_verbose("\nZBC Complete Memory Map (%d-bit %s):\n",
-	                   addr_bits, m_maincpu->name());
-	osd_printf_verbose("  %s - %s: RAM (%s)\n",
-	                   format_addr(0).c_str(),
+	osd_printf_verbose("\nZBC Complete Memory Map (%d-bit %s):\n", addr_bits,
+	                   m_maincpu->name());
+	osd_printf_verbose("  %s - %s: RAM (%s)\n", format_addr(0).c_str(),
 	                   format_addr(vram_addr - 1).c_str(),
 	                   format_ram_size(vram_addr).c_str());
-	osd_printf_verbose("  %s - %s: Video RAM (%s)\n",
-	                   format_addr(vram_addr).c_str(),
-	                   format_addr(vram_end).c_str(),
-	                   format_ram_size(VRAM_SIZE).c_str());
+	osd_printf_verbose(
+	    "  %s - %s: Video RAM (%s)\n", format_addr(vram_addr).c_str(),
+	    format_addr(vram_end).c_str(), format_ram_size(VRAM_SIZE).c_str());
 	if (vram_end < addr_space_size - 1) {
-		osd_printf_verbose("  %s - %s: RAM (%s)\n",
-		                   format_addr(vram_end + 1).c_str(),
-		                   format_addr(addr_space_size - 1).c_str(),
-		                   format_ram_size(addr_space_size - vram_end - 1).c_str());
+		osd_printf_verbose(
+		    "  %s - %s: RAM (%s)\n", format_addr(vram_end + 1).c_str(),
+		    format_addr(addr_space_size - 1).c_str(),
+		    format_ram_size(addr_space_size - vram_end - 1).c_str());
 	}
-	osd_printf_verbose("  Total RAM: %s\n\n", format_ram_size(addr_space_size - VRAM_SIZE).c_str());
+	osd_printf_verbose("  Total RAM: %s\n\n",
+	                   format_ram_size(addr_space_size - VRAM_SIZE).c_str());
 
 	// Initialize console with VRAM pointer
 	m_console.set_vram_base(m_videoram.target());
@@ -341,20 +353,20 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_reset() {
 	// Configure VSync interrupt based on JP1 jumper setting
 	uint8_t jumper_config = ioport("CONFIG")->read() & 0x03;
 	switch (jumper_config) {
-		case 0x00: // Disabled (default - safe for simple programs)
-			m_vsync_interrupt_enabled = false;
-			break;
-		case 0x01: // IRQ mode (maskable interrupts for OS development)
-			m_vsync_interrupt_enabled = true;
-			m_interrupt_line = INPUT_LINE_IRQ0;
-			break;
-		case 0x02: // NMI mode (non-maskable interrupts for OS development)
-			m_vsync_interrupt_enabled = true;
-			m_interrupt_line = INPUT_LINE_NMI;
-			break;
-		default:
-			m_vsync_interrupt_enabled = false;
-			break;
+	case 0x00: // Disabled (default - safe for simple programs)
+		m_vsync_interrupt_enabled = false;
+		break;
+	case 0x01: // IRQ mode (maskable interrupts for OS development)
+		m_vsync_interrupt_enabled = true;
+		m_interrupt_line = INPUT_LINE_IRQ0;
+		break;
+	case 0x02: // NMI mode (non-maskable interrupts for OS development)
+		m_vsync_interrupt_enabled = true;
+		m_interrupt_line = INPUT_LINE_NMI;
+		break;
+	default:
+		m_vsync_interrupt_enabled = false;
+		break;
 	}
 }
 
@@ -368,7 +380,8 @@ zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::quickload_cb(
     snapshot_image_device &image) {
 	// Check if CPU has program address space before loading
 	if (!m_maincpu || !m_maincpu->has_space(AS_PROGRAM)) {
-		osd_printf_error("ZBC quickload_cb: CPU '%s' has no AS_PROGRAM space, cannot load program\n",
+		osd_printf_error("ZBC quickload_cb: CPU '%s' has no AS_PROGRAM space, "
+		                 "cannot load program\n",
 		                 m_maincpu ? m_maincpu->name() : "null");
 		return std::make_pair(image_error::UNSPECIFIED,
 		                      "CPU has no program address space");
@@ -381,7 +394,8 @@ zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::quickload_cb(
 	if (size > vram_addr - LOAD_ADDR)
 		return std::make_pair(image_error::INVALIDLENGTH, "Program too large");
 
-	// Read into temporary buffer (can't read directly to fragmented address space)
+	// Read into temporary buffer (can't read directly to fragmented address
+	// space)
 	std::vector<uint8_t> program(size);
 	if (image.fread(&program[0], size) != size)
 		return std::make_pair(image_error::UNSPECIFIED,
