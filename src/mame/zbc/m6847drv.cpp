@@ -164,6 +164,14 @@ void MC6847Console::center_line(const char *text)
 	assert(text != nullptr);
 
 	int len = strlen(text);
+
+	// If text is too long to center on one line, fall back to print_sentence
+	if (len >= COLS) {
+		print_sentence(text);
+		output_char('\r');
+		return;
+	}
+
 	int padding = (COLS - len) / 2;
 
 	// Add leading spaces
