@@ -157,10 +157,43 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::mem_map(
 	const address_space_config &config = map.get_config();
 	zbc_addr_t addr_mask = (1ULL << config.addr_width()) - 1;
 
-	// Map entire address space as RAM
-	// VRAM will be installed over this in machine_start() with specific backing
-	// storage
-	map(0, addr_mask).ram();
+	// MAME's address_to_byte() size calculation overflows when mapping
+	// regions where (end - start + 1) exceeds offs_t max value.
+	// Split large address spaces into chunks to prevent overflow.
+	// Maximum safe region size: 2GB - 1 (0x7FFFFFFF)
+	constexpr zbc_addr_t MAX_SAFE_SIZE = 0x7FFFFFFF;
+
+	zbc_size_t total_size = static_cast<zbc_size_t>(addr_mask) + 1;
+
+	if (total_size <= MAX_SAFE_SIZE) {
+		// Address space fits in single allocation
+		osd_printf_verbose("ZBC: Mapping 0x0-0x%llX as single RAM region\n",
+		                   (unsigned long long)addr_mask);
+		map(0, addr_mask).ram();
+	} else {
+		// Split into 2GB chunks to avoid overflow in MAME's size calculation
+		osd_printf_verbose("ZBC: Splitting large address space into 2GB chunks\n");
+		zbc_addr_t current_start = 0;
+		while (current_start <= addr_mask) {
+			zbc_addr_t chunk_end = current_start + MAX_SAFE_SIZE;
+			if (chunk_end > addr_mask)
+				chunk_end = addr_mask;
+
+			osd_printf_verbose("ZBC:   Chunk 0x%llX-0x%llX\n",
+			                   (unsigned long long)current_start,
+			                   (unsigned long long)chunk_end);
+			map(current_start, chunk_end).ram();
+
+			// Check for wrap-around before incrementing
+			if (chunk_end == addr_mask)
+				break;
+
+			current_start = chunk_end + 1;
+		}
+	}
+
+	// VRAM will be installed over these regions in machine_start() with
+	// specific backing storage
 }
 
 template <typename CPU_TYPE, zbc_addr_t LOAD_ADDR, zbc_speed_t CPU_SPEED,
