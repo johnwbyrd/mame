@@ -48,6 +48,7 @@
 
 #include "imagedev/snapquik.h"
 #include "video/mc6847.h"
+#include "m6847drv.h"
 
 namespace {
 
@@ -104,13 +105,11 @@ class zbc_state : public driver_device {
 	bool m_vsync_interrupt_enabled = false;
 	int m_interrupt_line = INPUT_LINE_IRQ0;
 
+	// MC6847 console driver for text display
+	MC6847Console m_console;
+
 	void mem_map(address_map &map) ATTR_COLD;
 	void init_screen();
-	void chrout(char c);
-	void print_word(const char *word);
-	void print_sentence(const char *text);
-	void center_line(const char *text);
-	void scroll_up();
 
 	DECLARE_QUICKLOAD_LOAD_MEMBER(quickload_cb);
 
@@ -167,11 +166,6 @@ class zbc_state : public driver_device {
 		}
 		return std::string(buf);
 	}
-
-	int m_cursor_pos;
-	static constexpr int LINE_WIDTH = 32;
-	static constexpr int SCREEN_HEIGHT = 16;
-	static constexpr int SCREEN_SIZE = 0x200;
 };
 
 template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
@@ -212,117 +206,13 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::vdg_fsync(int state) 
 
 template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
           uint32_t VRAM_ADDR>
-void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::scroll_up() {
-	for (int i = 0; i < SCREEN_SIZE - LINE_WIDTH; i++)
-		m_videoram[i] = m_videoram[i + LINE_WIDTH];
-
-	for (int i = SCREEN_SIZE - LINE_WIDTH; i < SCREEN_SIZE; i++)
-		m_videoram[i] = 0x20;
-
-	m_cursor_pos -= LINE_WIDTH;
-	if (m_cursor_pos < 0)
-		m_cursor_pos = 0;
-}
-
-template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
-          uint32_t VRAM_ADDR>
-void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::chrout(char c) {
-	if (c == '\r' || c == '\n') {
-		m_cursor_pos = ((m_cursor_pos / LINE_WIDTH) + 1) * LINE_WIDTH;
-		if (m_cursor_pos >= SCREEN_SIZE) {
-			scroll_up();
-			m_cursor_pos = SCREEN_SIZE - LINE_WIDTH;
-		}
-	} else {
-		m_videoram[m_cursor_pos] = toupper(c);
-		m_cursor_pos++;
-		if (m_cursor_pos >= SCREEN_SIZE) {
-			scroll_up();
-			m_cursor_pos = SCREEN_SIZE - LINE_WIDTH;
-		}
-	}
-}
-
-template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
-          uint32_t VRAM_ADDR>
-void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::print_word(
-    const char *word) {
-	int word_len = strlen(word);
-	int col = m_cursor_pos % LINE_WIDTH;
-
-	int needed = word_len;
-	if (col > 0)
-		needed++;
-
-	if (col > 0 && col + needed > LINE_WIDTH) {
-		chrout('\r');
-		col = 0;
-	}
-
-	if (col > 0)
-		chrout(' ');
-
-	for (int i = 0; i < word_len; i++)
-		chrout(word[i]);
-}
-
-template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
-          uint32_t VRAM_ADDR>
-void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::print_sentence(
-    const char *text) {
-	char word[64];
-	int word_idx = 0;
-
-	for (const char *p = text; *p; p++) {
-		if (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
-			if (word_idx > 0) {
-				word[word_idx] = '\0';
-				print_word(word);
-				word_idx = 0;
-			}
-		} else {
-			if (word_idx < 63)
-				word[word_idx++] = *p;
-		}
-	}
-
-	if (word_idx > 0) {
-		word[word_idx] = '\0';
-		print_word(word);
-	}
-}
-
-template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
-          uint32_t VRAM_ADDR>
-void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::center_line(
-    const char *text) {
-	int len = strlen(text);
-	int padding = (LINE_WIDTH - len) / 2;
-
-	for (int i = 0; i < padding; i++)
-		chrout(' ');
-
-	for (int i = 0; i < len; i++)
-		chrout(text[i]);
-
-	// Only add newline if we're not already at the start of a line
-	// (which happens when text wraps beyond LINE_WIDTH)
-	if ((m_cursor_pos % LINE_WIDTH) != 0)
-		chrout('\r');
-}
-
-template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
-          uint32_t VRAM_ADDR>
 void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
-	for (int i = 0; i < 0x200; i++)
-		m_videoram[i] = 0x20;
+	m_console.clear_screen();
 
-	m_cursor_pos = 0;
-
-	center_line("Zero board computer");
-	center_line(m_maincpu->name());
-	center_line("www.zeroboardcomputer.com");
-	center_line("");
+	m_console.center_line("Zero board computer");
+	m_console.center_line(m_maincpu->name());
+	m_console.center_line("www.zeroboardcomputer.com");
+	m_console.center_line("");
 
 	// Display memory configuration
 	char addr_buf[64];
@@ -331,17 +221,17 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
 	uint64_t available_ram = vram_addr - LOAD_ADDR;
 
 	snprintf(addr_buf, sizeof(addr_buf), "Load address: 0x%llX", (unsigned long long)LOAD_ADDR);
-	center_line(addr_buf);
+	m_console.center_line(addr_buf);
 
 	snprintf(addr_buf, sizeof(addr_buf), "Available RAM: %llu bytes",
 	         (unsigned long long)available_ram);
-	center_line(addr_buf);
+	m_console.center_line(addr_buf);
 
 	snprintf(addr_buf, sizeof(addr_buf), "Video RAM: 0x%llX-0x%llX",
 	         (unsigned long long)vram_addr, (unsigned long long)(vram_addr + VRAM_SIZE - 1));
-	center_line(addr_buf);
+	m_console.center_line(addr_buf);
 
-	center_line("");
+	m_console.center_line("");
 
 	std::string ram_size_str = format_ram_size(available_ram);
 	std::string intro = "This system has " + ram_size_str +
@@ -349,7 +239,7 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
 	                    "Load and execute a headerless binary in MAME "
 						"by using the -quik option. "
 	                    "Happy coding!";
-	print_sentence(intro.c_str());
+	m_console.print_sentence(intro.c_str());
 }
 
 template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
@@ -438,37 +328,15 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_start() {
 		                   format_ram_size(addr_space_size - vram_end - 1).c_str());
 	}
 	osd_printf_verbose("  Total RAM: %s\n\n", format_ram_size(addr_space_size - VRAM_SIZE).c_str());
-}
 
-// CPU-specific idle initialization using template specialization.
-//
-// This uses C++ template specialization to provide CPU-specific boot code
-// while maintaining a generic interface. The compiler selects the most
-// specific matching template at compile time based on CPU_TYPE and LOAD_ADDR.
-//
-// Each specialization writes reset vectors and idle loops appropriate for
-// the CPU architecture, allowing the system to boot and wait for quickload.
-template <typename CPU_TYPE, uint32_t LOAD_ADDR>
-void init_cpu_for_idle(address_space &space) {
-	// Default: no special initialization needed for CPUs without specialization
+	// Initialize console with VRAM pointer
+	m_console.set_vram_base(m_videoram.target());
 }
 
 template <typename CPU_TYPE, uint32_t LOAD_ADDR, uint32_t CPU_SPEED,
           uint32_t VRAM_ADDR>
 void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_reset() {
 	init_screen();
-
-	// Check if CPU has program address space before initializing
-	if (!m_maincpu || !m_maincpu->has_space(AS_PROGRAM)) {
-		osd_printf_error("ZBC machine_reset: CPU '%s' has no AS_PROGRAM space, cannot initialize CPU for idle\n",
-		                 m_maincpu ? m_maincpu->name() : "null");
-		return;
-	}
-
-	address_space &space = m_maincpu->space(AS_PROGRAM);
-
-	// Call CPU-specific initialization
-	init_cpu_for_idle<CPU_TYPE, LOAD_ADDR>(space);
 
 	// Configure VSync interrupt based on JP1 jumper setting
 	uint8_t jumper_config = ioport("CONFIG")->read() & 0x03;
