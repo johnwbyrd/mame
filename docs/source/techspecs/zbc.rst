@@ -78,8 +78,100 @@ Each ZBC system includes:
 * **Semihosting**: RIFF-based memory-mapped I/O interface (1024 bytes)
 * **Quickload**: Support for loading headerless binary programs
 * **CPU Init**: Architecture-specific boot code (reset vectors, etc.)
+* **JP1 Jumper**: Configurable VSync interrupt routing (see 2.3)
 
-2.3 Dynamic Memory Layout Calculation
+2.3 VSync Interrupt Configuration (JP1 Jumper)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ZBC hardware includes a 3-position configuration jumper (JP1) that controls
+how the MC6847 VDG's vertical sync (field sync) signal is routed to the CPU.
+This allows software developers to choose the interrupt behavior that best suits
+their application.
+
+**JP1 Jumper Positions**:
+
+* **Position 1-2: Disabled (Default)**
+
+  VSync signal is not connected to CPU interrupts. The MC6847 generates video
+  output normally but does not trigger any CPU interrupts.
+
+  **Use case**: Simple test programs, debugging, any code that doesn't need
+  periodic timer interrupts. This is the safe default that prevents unexpected
+  interrupt-related bugs in programs without proper interrupt handlers.
+
+* **Position 2-3: IRQ (Maskable Interrupt)**
+
+  VSync signal drives the CPU's IRQ line at approximately 60Hz (NTSC) or 62Hz (PAL).
+  The CPU can mask (disable) these interrupts using its interrupt disable flag.
+
+  **Use case**: Operating system development, cooperative multitasking, applications
+  requiring maskable periodic timing. Suitable for software that needs timer
+  interrupts but also needs the ability to temporarily disable them during
+  critical sections.
+
+* **Position 3-4: NMI (Non-Maskable Interrupt)**
+
+  VSync signal drives the CPU's NMI line at approximately 60Hz (NTSC) or 62Hz (PAL).
+  These interrupts cannot be masked by software and will always fire.
+
+  **Use case**: Hard real-time systems, preemptive multitasking, watchdog timers,
+  or applications requiring guaranteed periodic execution. Software **must**
+  provide proper NMI handlers or the system will crash.
+
+**MAME Configuration**:
+
+The jumper setting is controlled via MAME's configuration UI or command-line::
+
+    # View/change jumper setting in MAME UI
+    mame zbcz80 -quik program.bin
+    # Press TAB → Machine Configuration → JP1: VSync Interrupt
+
+    # Set via configuration file (mame.ini or zbcz80.ini)
+    # Add under [zbcz80] section:
+    # (values: 0=Disabled, 1=IRQ, 2=NMI)
+
+**Technical Details**:
+
+The MC6847 VDG generates a field sync (FS) pulse at the start of each video
+frame. In PAL mode (used by ZBC), this occurs at approximately 62.5 Hz based
+on the 4.433619 MHz crystal and 312 scanlines per frame. This signal is
+connected to a callback that conditionally asserts the configured interrupt
+line based on the JP1 jumper setting.
+
+**Historical Context**:
+
+This design mirrors authentic 1980s home computer hardware. For example, the
+Tandy Color Computer and Dragon 32/64 routed the MC6847's FS signal through
+a PIA (Peripheral Interface Adapter) to the CPU's IRQ line, providing a
+system timer without requiring a separate timer IC. The ZBC's jumper-based
+approach provides similar functionality while offering flexibility for
+different use cases.
+
+**Programming Considerations**:
+
+When using IRQ or NMI modes, programs must:
+
+1. **Install interrupt handlers** at the appropriate vector addresses:
+
+   - Z80 NMI vector: 0x0066
+   - 6502 IRQ vector: 0xFFFE-0xFFFF
+   - 6502 NMI vector: 0xFFFA-0xFFFB
+   - (other CPUs: consult CPU-specific documentation)
+
+2. **Return from interrupt** using the appropriate instruction:
+
+   - Z80 IRQ: RETI (0xED 0x4D)
+   - Z80 NMI: RETN (0xED 0x45)
+   - 6502: RTI (0x40)
+   - (other CPUs: consult CPU-specific documentation)
+
+3. **Acknowledge interrupts** if required by the CPU architecture
+
+Without proper interrupt handlers, enabling JP1 IRQ/NMI modes will cause
+system crashes or memory corruption as the CPU repeatedly pushes return
+addresses onto the stack without returning.
+
+2.4 Dynamic Memory Layout Calculation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The ZBC memory layout is **dynamically calculated** based on CPU address width
@@ -152,7 +244,7 @@ This scales the reserved region proportionally with address space:
 The layout scales automatically across all address space sizes, ensuring
 consistent peripheral placement while maximizing available RAM.
 
-2.4 DEFINE_ZBC Macro
+2.5 DEFINE_ZBC Macro
 ~~~~~~~~~~~~~~~~~~~~
 
 The ``DEFINE_ZBC`` macro in ``zbc.cpp`` generates a complete ZBC variant::
