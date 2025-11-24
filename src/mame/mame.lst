@@ -20961,6 +20961,7 @@ sc133
 sc203
 
 @source:homebrew/sbc6510.cpp
+sbc6510
 
 @source:homebrew/sitcom.cpp
 sitcom
@@ -49601,7 +49602,7 @@ monymony
 monymony2
 monymony3
 
-@source:zbc/zbc.cpp
+@source:zbc/zbcgen.ipp
 zbc5a22
 zbcadsp21062
 zbcam186em
