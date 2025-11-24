@@ -30,8 +30,8 @@
     mame zbc68000 -quik program.bin
     etc.
 
-    The program will be loaded at the configured address (default 0x0200)
-    and executed.
+    The program will be loaded at a dynamically calculated address based on
+    CPU address space width (formula: 2^(1 + addr_bits/2)) and executed.
 
 ***************************************************************************/
 
@@ -62,10 +62,10 @@ using zbc_speed_t = uint64_t;   // CPU speeds (64-bit for future GHz ranges)
 
 // Template parameters:
 //   CPU_TYPE:   CPU device class (e.g., m6502_device, z80_device)
-//   LOAD_ADDR:  Quickload program load address (default 0x0200)
+//   LOAD_ADDR:  Quickload program load address (default 0 = auto-calculate)
 //   CPU_SPEED:  CPU clock frequency in Hz (default 10 MHz)
 //   VRAM_ADDR:  Video RAM base (default 0 = auto-calculate near top of address space)
-template <typename CPU_TYPE, zbc_addr_t LOAD_ADDR = 0x0200,
+template <typename CPU_TYPE, zbc_addr_t LOAD_ADDR = 0,
           zbc_speed_t CPU_SPEED = 10'000'000, zbc_addr_t VRAM_ADDR = 0>
 class zbc_state : public driver_device {
   public:
@@ -117,6 +117,17 @@ class zbc_state : public driver_device {
 		int addr_bits = m_maincpu->space(AS_PROGRAM).addr_width();
 		zbc_addr_t reserved_start = (1ULL << addr_bits) - (1ULL << (addr_bits / 2));
 		return reserved_start - VRAM_SIZE;
+	}
+
+	// Calculate load address - placed proportionally in address space.
+	// For n-bit space, load at 2^(1 + n/2):
+	//   16-bit (64KB):  0x200     24-bit (16MB):  0x2000      32-bit (4GB):  0x20000
+	// MUST be called only when address space exists (machine_start(), not mem_map()).
+	zbc_addr_t get_load_addr() const {
+		if (LOAD_ADDR != 0)
+			return LOAD_ADDR;
+		int addr_bits = m_maincpu->space(AS_PROGRAM).addr_width();
+		return (1ULL << (1 + addr_bits / 2));
 	}
 
 	// Format memory size in human-readable units (KB, MB, GB)
@@ -231,11 +242,12 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
 	// Display memory configuration
 	char addr_buf[64];
 	zbc_addr_t vram_addr = get_vram_addr();
+	zbc_addr_t load_addr = get_load_addr();
 	// Calculate total RAM available for programs (everything before VRAM)
-	zbc_size_t available_ram = vram_addr - LOAD_ADDR;
+	zbc_size_t available_ram = vram_addr - load_addr;
 
 	snprintf(addr_buf, sizeof(addr_buf), "Load address: 0x%llX",
-	         (unsigned long long)LOAD_ADDR);
+	         (unsigned long long)load_addr);
 	m_console.center_line(addr_buf);
 
 	snprintf(addr_buf, sizeof(addr_buf), "Available RAM: %llu bytes",
@@ -388,9 +400,10 @@ zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::quickload_cb(
 
 	const zbc_size_t size = image.length();
 	const zbc_addr_t vram_addr = get_vram_addr();
+	const zbc_addr_t load_addr = get_load_addr();
 
-	// Validate program fits between LOAD_ADDR and video RAM
-	if (size > vram_addr - LOAD_ADDR)
+	// Validate program fits between load address and video RAM
+	if (size > vram_addr - load_addr)
 		return std::make_pair(image_error::INVALIDLENGTH, "Program too large");
 
 	// Read into temporary buffer (can't read directly to fragmented address
@@ -403,14 +416,14 @@ zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::quickload_cb(
 	// Write program to memory byte-by-byte (handles endianness/bus width)
 	address_space &space = m_maincpu->space(AS_PROGRAM);
 	for (zbc_addr_t i = 0; i < size; i++)
-		space.write_byte(LOAD_ADDR + i, program[i]);
+		space.write_byte(load_addr + i, program[i]);
 
 	// Clear screen to remove boot message
 	init_screen();
 
 	// Set PC to start of loaded program
 	// Standard MAME quickload practice: quickload does NOT automatically set PC
-	m_maincpu->set_pc(LOAD_ADDR);
+	m_maincpu->set_pc(load_addr);
 
 	return std::make_pair(std::error_condition(), std::string()); // Success
 }
@@ -463,7 +476,8 @@ INPUT_PORTS_END
 //   short_name: Machine name suffix, creates "zbc<short_name>" (e.g., 6502 → zbc6502)
 //   display_name: Human-readable name for UI (e.g., "MOS 6502")
 //   ...: Optional template parameter overrides (load_addr, cpu_speed, vram_addr)
-//        Example: DEFINE_ZBC(..., ..., ..., ..., 0x1000, 8000000) sets LOAD_ADDR=0x1000, CPU_SPEED=8MHz
+//        Example: DEFINE_ZBC(..., ..., ..., ..., 0x1000, 8000000) overrides LOAD_ADDR=0x1000, CPU_SPEED=8MHz
+//        (if LOAD_ADDR not specified, defaults to 0 = auto-calculate based on address space width)
 #define DEFINE_ZBC(cpu_class, cpu_type, short_name, display_name, ...)         \
 	namespace {                                                                \
 	class zbc_##short_name##_state                                             \

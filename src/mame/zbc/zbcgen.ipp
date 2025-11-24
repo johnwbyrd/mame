@@ -402,8 +402,6 @@ DEFINE_ZBC(z8s180_device, Z8S180, z8s180, "Zilog Z8S180")
 // DEFINE_ZBC(i8041ah_device, I8041AH, i8041ah, "Intel 8041AH")
 //   Status: broken_validate
 //   Notes: Test failed: Unknown error -11 (exjbyrd@dev03:~/git/mame$ ./mame -window
-Ignoring MAME exception: asmjit error 14: LabelAlreadyBound
-Fatal error: asmjit error 14: LabelAlreadyBoundit -11)
 
 // DEFINE_ZBC(i8042_device, I8042, i8042, "Intel 8042")
 //   Status: broken_validate
@@ -446,8 +444,6 @@ Fatal error: asmjit error 14: LabelAlreadyBoundit -11)
 //   Notes: Requires internal ROM/RAM regions not provided by ZBC
 
 // DEFINE_ZBC(i8648_device, I8648, i8648, "Intjbyrd@dev03:~/git/mame$ ./mame -window
-Ignoring MAME exception: asmjit error 14: LabelAlreadyBound
-Fatal error: asmjit error 14: LabelAlreadyBoundel 8648")
 //   Status: broken_validate
 //   Notes: Test failed: Unknown error -11 (exit -11)
 
@@ -534,9 +530,7 @@ Fatal error: asmjit error 14: LabelAlreadyBoundel 8648")
 // DEFINE_ZBC(pcxport_dmac_device, PCXPORT_DMAC, pcx_dmac, "PC Transporter DMAC")
 //   Status: not_cpu
 //   Notes: DMA controller
-jbyrd@dev03:~/git/mame$ ./mame -window
-Ignoring MAME exception: asmjit error 14: LabelAlreadyBound
-Fatal error: asmjit error 14: LabelAlreadyBound
+
 // DEFINE_ZBC(ppc403ga_device, PPC403GA, ppc403ga, "IBM PowerPC 403GA")
 //   Status: broken_drc
 //   Notes: DRC static handlers cause infinite loop
@@ -576,8 +570,6 @@ Fatal error: asmjit error 14: LabelAlreadyBound
 // DEFINE_ZBC(ppc740_device, PPC740, ppc740, "IBM PowerPC 740")
 //   Status: broken_drc
 //   Notes: DRC static handlers cause infinitejbyrd@dev03:~/git/mame$ ./mame -window
-Ignoring MAME exception: asmjit error 14: LabelAlreadyBound
-Fatal error: asmjit error 14: LabelAlreadyBound loop
 
 // DEFINE_ZBC(ppc750_device, PPC750, ppc750, "IBM PowerPC 750")
 //   Status: broken_drc
