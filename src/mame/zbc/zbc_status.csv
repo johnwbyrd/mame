@@ -206,17 +206,17 @@ pentium3,PENTIUM3,pentium3_device,Intel Pentium III,working,cpu/i386/i386.h,
 pentium4,PENTIUM4,pentium4_device,Intel Pentium 4,working,cpu/i386/i386.h,
 pentium_mmx,PENTIUM_MMX,pentium_mmx_device,Intel Pentium MMX,working,cpu/i386/i386.h,
 pentium_pro,PENTIUM_PRO,pentium_pro_device,Intel Pentium Pro,working,cpu/i386/i386.h,
-ppc403ga,PPC403GA,ppc403ga_device,IBM PowerPC 403GA,working,cpu/powerpc/ppc.h,
-ppc403gcx,PPC403GCX,ppc403gcx_device,IBM PowerPC 403GCX,working,cpu/powerpc/ppc.h,
-ppc405gp,PPC405GP,ppc405gp_device,IBM PowerPC 405GP,working,cpu/powerpc/ppc.h,
-ppc601,PPC601,ppc601_device,IBM PowerPC 601,working,cpu/powerpc/ppc.h,
-ppc602,PPC602,ppc602_device,IBM PowerPC 602,working,cpu/powerpc/ppc.h,
-ppc603,PPC603,ppc603_device,IBM PowerPC 603,working,cpu/powerpc/ppc.h,
-ppc603e,PPC603E,ppc603e_device,IBM PowerPC 603E,working,cpu/powerpc/ppc.h,
-ppc603r,PPC603R,ppc603r_device,IBM PowerPC 603R,working,cpu/powerpc/ppc.h,
-ppc604,PPC604,ppc604_device,IBM PowerPC 604,working,cpu/powerpc/ppc.h,
-ppc740,PPC740,ppc740_device,IBM PowerPC 740,working,cpu/powerpc/ppc.h,
-ppc750,PPC750,ppc750_device,IBM PowerPC 750,working,cpu/powerpc/ppc.h,
+ppc403ga,PPC403GA,ppc403ga_device,IBM PowerPC 403GA,broken_drc,cpu/powerpc/ppc.h,DRC static handlers cause infinite loop
+ppc403gcx,PPC403GCX,ppc403gcx_device,IBM PowerPC 403GCX,broken_drc,cpu/powerpc/ppc.h,DRC static handlers cause infinite loop
+ppc405gp,PPC405GP,ppc405gp_device,IBM PowerPC 405GP,broken_drc,cpu/powerpc/ppc.h,DRC static handlers cause infinite loop
+ppc601,PPC601,ppc601_device,IBM PowerPC 601,broken_drc,cpu/powerpc/ppc.h,DRC static handlers cause infinite loop
+ppc602,PPC602,ppc602_device,IBM PowerPC 602,broken_drc,cpu/powerpc/ppc.h,DRC static handlers cause infinite loop
+ppc603,PPC603,ppc603_device,IBM PowerPC 603,broken_drc,cpu/powerpc/ppc.h,DRC static handlers cause infinite loop
+ppc603e,PPC603E,ppc603e_device,IBM PowerPC 603E,broken_drc,cpu/powerpc/ppc.h,DRC static handlers cause infinite loop
+ppc603r,PPC603R,ppc603r_device,IBM PowerPC 603R,broken_drc,cpu/powerpc/ppc.h,DRC static handlers cause infinite loop
+ppc604,PPC604,ppc604_device,IBM PowerPC 604,broken_drc,cpu/powerpc/ppc.h,DRC static handlers cause infinite loop
+ppc740,PPC740,ppc740_device,IBM PowerPC 740,broken_drc,cpu/powerpc/ppc.h,DRC static handlers cause infinite loop
+ppc750,PPC750,ppc750_device,IBM PowerPC 750,broken_drc,cpu/powerpc/ppc.h,DRC static handlers cause infinite loop
 pps4,PPS4,pps4_device,Rockwell PPS4-4,working,cpu/pps4/pps4.h,
 pps4_2,PPS4_2,pps4_2_device,Rockwell PPS-4/2,working,cpu/pps4/pps4.h,
 ps2gif,SONYPS2_GIF,ps2_gif_device,Playstation 2 GIF,not_cpu,,Graphics Interface
