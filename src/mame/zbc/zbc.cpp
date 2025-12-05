@@ -107,6 +107,7 @@ class zbc_state : public driver_device {
 	void init_screen();
 
 	DECLARE_QUICKLOAD_LOAD_MEMBER(quickload_cb);
+	bool set_pc_generically(zbc_addr_t addr);
 
 	uint8_t vdg_videoram_r(offs_t offset);
 	void vdg_fsync(int state);
@@ -425,6 +426,68 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_reset() {
 	}
 }
 
+/***************************************************************************
+ * set_pc_generically - Set program counter using symbol name lookup
+ *
+ * BACKGROUND: MAME's set_pc() method doesn't work for all CPU types.
+ *
+ * The standard set_pc() calls set_state_int(STATE_GENPC, pc), which requires
+ * the CPU to register STATE_GENPC with the .callimport() flag. When callimport
+ * is present, writing to that state entry triggers state_import() which syncs
+ * the value to the CPU's internal registers.
+ *
+ * PROBLEM: Approximately 50% of MAME's CPU implementations do NOT register
+ * STATE_GENPC with callimport. For example, m6502.cpp line 59:
+ *
+ *     state_add(STATE_GENPC, "GENPC", XPC).callexport().noshow();
+ *
+ * Without callimport, set_pc() writes to a temporary variable (XPC) that is
+ * never synced back to the actual program counter (NPC). The CPU continues
+ * executing from its reset vector instead of the requested address.
+ *
+ * CPUs WITHOUT callimport on STATE_GENPC (broken set_pc):
+ *   m6502, w65c02, r65c02, m65c02, arm7, superfx, mips3, i960, e132xs, etc.
+ *
+ * CPUs WITH callimport on STATE_GENPC (working set_pc):
+ *   z80, m68000, sh2, sh4, g65816, m6809, cosmac, etc.
+ *
+ * SOLUTION: All CPUs register their native "PC" register with callimport.
+ * For m6502.cpp line 62:
+ *
+ *     state_add(M6502_PC, "PC", NPC).callimport();
+ *
+ * By looking up the state entry with symbol "PC" and writing directly to it,
+ * we bypass the broken STATE_GENPC mechanism and use the CPU's working
+ * native PC register.
+ *
+ * This function iterates through state_entries(), finds the entry with
+ * symbol() == "PC", and calls set_value() on it.
+ *
+ * HISTORY: The m6502 STATE_GENPC was changed in commit 38306e6b274 (Feb 2018)
+ * from pointing to NPC (actual PC) to XPC (temp variable) to support
+ * pc_to_external() translation for banked memory variants. The author added
+ * callexport for reading but forgot callimport for writing.
+ *
+ * Returns true if PC was set, false if no writeable "PC" register was found.
+ ***************************************************************************/
+template <typename CPU_TYPE, zbc_addr_t LOAD_ADDR, zbc_speed_t CPU_SPEED,
+          zbc_addr_t VRAM_ADDR>
+bool zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::set_pc_generically(
+    zbc_addr_t addr) {
+	for (auto &entry : m_maincpu->state_entries()) {
+		if (entry->symbol() && strcmp(entry->symbol(), "PC") == 0) {
+			if (entry->writeable()) {
+				entry->set_value(addr);
+				return true;
+			}
+			osd_printf_error("ZBC: PC register found but not writeable\n");
+			return false;
+		}
+	}
+	osd_printf_error("ZBC: No PC register found in CPU state entries\n");
+	return false;
+}
+
 // Quickload callback: Load binary program into memory
 // Called when user specifies -quik program.bin on command line.
 // Loads raw binary at LOAD_ADDR and prepares system for execution.
@@ -466,8 +529,16 @@ zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::quickload_cb(
 	init_screen();
 
 	// Set PC to start of loaded program
-	// Standard MAME quickload practice: quickload does NOT automatically set PC
-	m_maincpu->set_pc(load_addr);
+	// Use set_pc_generically() because set_pc() doesn't work on all CPU types
+	osd_printf_info("ZBC quickload: loaded %llu bytes at 0x%llX, setting PC to 0x%llX\n",
+	                (unsigned long long)size,
+	                (unsigned long long)load_addr,
+	                (unsigned long long)load_addr);
+
+	if (!set_pc_generically(load_addr)) {
+		osd_printf_warning("ZBC: set_pc_generically failed, falling back to set_pc\n");
+		m_maincpu->set_pc(load_addr);
+	}
 
 	return std::make_pair(std::error_condition(), std::string()); // Success
 }

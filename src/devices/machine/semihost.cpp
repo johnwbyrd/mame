@@ -31,7 +31,7 @@
 #define LOG_REG     (1U << 1)
 #define LOG_REQUEST (1U << 2)
 
-#define VERBOSE (LOG_GENERAL)
+#define VERBOSE (LOG_GENERAL | LOG_REG | LOG_REQUEST)
 #include "logmacro.h"
 
 #define LOGREG(...)     LOGMASKED(LOG_REG, __VA_ARGS__)
@@ -183,6 +183,7 @@ void semihost_device::device_stop()
 
 u8 semihost_device::read(offs_t offset)
 {
+	osd_printf_info("SEMIHOST READ: offset=0x%02x\n", offset);
 	if (offset >= ZBC_REG_SIZE)
 		return 0xff;
 
