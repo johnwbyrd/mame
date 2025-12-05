@@ -81,6 +81,9 @@ private:
 	static void mem_read_block(void *dest, u64 addr, size_t size, void *ctx);
 	static void mem_write_block(u64 addr, const void *src, size_t size, void *ctx);
 
+	// Exit callback for C library (schedules MAME to exit)
+	static void on_exit_callback(void *ctx, unsigned int reason, unsigned int subcode);
+
 	// Get default sandbox directory (cross-platform)
 	static std::string get_default_sandbox_dir();
 };

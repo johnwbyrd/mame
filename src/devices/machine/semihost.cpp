@@ -121,6 +121,9 @@ void semihost_device::device_start()
 	// Initialize secure ANSI backend with sandbox
 	zbc_ansi_init(m_backend, sandbox.c_str());
 
+	// Register exit callback so guest SYS_EXIT triggers MAME exit
+	zbc_ansi_set_callbacks(m_backend, nullptr, on_exit_callback, this);
+
 	// Allocate and initialize host state
 	m_host = new zbc_host_state_t();
 
@@ -413,6 +416,13 @@ void semihost_device::mem_write_block(u64 addr, const void *src, size_t size, vo
 	const u8 *s = static_cast<const u8 *>(src);
 	for (size_t i = 0; i < size; i++)
 		space.write_byte(addr + i, s[i]);
+}
+
+void semihost_device::on_exit_callback(void *ctx, unsigned int reason, unsigned int subcode)
+{
+	auto *dev = static_cast<semihost_device *>(ctx);
+	LOG("semihost: guest requested exit with code %u (subcode %u)\n", reason, subcode);
+	dev->machine().schedule_exit();
 }
 
 
