@@ -54,7 +54,7 @@ private:
 	std::unique_ptr<u8[]> m_work_buffer;
 
 	// Device registers
-	u64 m_riff_ptr;
+	u8 m_riff_ptr[16];  // 16 bytes to support up to 128-bit guest pointers
 	u8 m_irq_status;
 	u8 m_irq_enable;
 	u8 m_status;

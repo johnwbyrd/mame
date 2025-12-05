@@ -14,8 +14,6 @@
 #include "emu.h"
 #include "semihost.h"
 
-#include "cpu/m6502/m6502.h"
-
 // For cross-platform home directory
 #ifdef _WIN32
 #include <windows.h>
@@ -27,11 +25,25 @@
 #include <sys/types.h>
 #endif
 
-#define LOG_GENERAL (1U << 0)
-#define LOG_REG     (1U << 1)
-#define LOG_REQUEST (1U << 2)
+// Semihost logging - compile-time configurable
+#ifndef SEMIHOST_LOG_GENERAL
+#define SEMIHOST_LOG_GENERAL (1U << 0)
+#endif
+#ifndef SEMIHOST_LOG_REG
+#define SEMIHOST_LOG_REG     (1U << 1)
+#endif
+#ifndef SEMIHOST_LOG_REQUEST
+#define SEMIHOST_LOG_REQUEST (1U << 2)
+#endif
+#ifndef SEMIHOST_VERBOSE
+#define SEMIHOST_VERBOSE 0  // Change to enable categories
+#endif
 
-#define VERBOSE (LOG_GENERAL | LOG_REG | LOG_REQUEST)
+#define LOG_GENERAL     SEMIHOST_LOG_GENERAL
+#define LOG_REG         SEMIHOST_LOG_REG
+#define LOG_REQUEST     SEMIHOST_LOG_REQUEST
+#define VERBOSE         SEMIHOST_VERBOSE
+#define LOG_OUTPUT_FUNC osd_printf_verbose
 #include "logmacro.h"
 
 #define LOGREG(...)     LOGMASKED(LOG_REG, __VA_ARGS__)
@@ -58,7 +70,7 @@ semihost_device::semihost_device(const machine_config &mconfig, const char *tag,
 	, m_host(nullptr)
 	, m_backend(nullptr)
 	, m_work_buffer(nullptr)
-	, m_riff_ptr(0)
+	, m_riff_ptr{}
 	, m_irq_status(0)
 	, m_irq_enable(0)
 	, m_status(ZBC_STATUS_DEVICE_PRESENT)
@@ -141,7 +153,7 @@ void semihost_device::device_start()
 
 void semihost_device::device_reset()
 {
-	m_riff_ptr = 0;
+	memset(m_riff_ptr, 0, sizeof(m_riff_ptr));
 	m_irq_status = 0;
 	m_irq_enable = 0;  // IRQ disabled by default - guest must opt-in
 	m_status = ZBC_STATUS_DEVICE_PRESENT;
@@ -183,7 +195,6 @@ void semihost_device::device_stop()
 
 u8 semihost_device::read(offs_t offset)
 {
-	osd_printf_info("SEMIHOST READ: offset=0x%02x\n", offset);
 	if (offset >= ZBC_REG_SIZE)
 		return 0xff;
 
@@ -198,9 +209,9 @@ u8 semihost_device::read(offs_t offset)
 	}
 	else if (offset < ZBC_REG_DOORBELL)
 	{
-		// RIFF_PTR: 16-byte pointer field (native endian)
+		// RIFF_PTR: 16-byte pointer field (supports up to 128-bit guest pointers)
 		unsigned ptr_offset = offset - ZBC_REG_RIFF_PTR;
-		u8 val = (m_riff_ptr >> (ptr_offset * 8)) & 0xff;
+		u8 val = m_riff_ptr[ptr_offset];
 		LOGREG("semihost: read RIFF_PTR[%d] = 0x%02x\n", ptr_offset, val);
 		return val;
 	}
@@ -257,18 +268,15 @@ void semihost_device::write(offs_t offset, u8 data)
 	}
 	else if (offset < ZBC_REG_DOORBELL)
 	{
-		// RIFF_PTR: 16-byte pointer field (native endian)
+		// RIFF_PTR: 16-byte pointer field (supports up to 128-bit guest pointers)
 		unsigned ptr_offset = offset - ZBC_REG_RIFF_PTR;
-		u64 mask = u64(0xff) << (ptr_offset * 8);
-		m_riff_ptr = (m_riff_ptr & ~mask) | (u64(data) << (ptr_offset * 8));
-		LOGREG("semihost: write RIFF_PTR[%d] = 0x%02x (ptr now 0x%016llx)\n",
-		       ptr_offset, data, (unsigned long long)m_riff_ptr);
+		m_riff_ptr[ptr_offset] = data;
+		LOGREG("semihost: write RIFF_PTR[%d] = 0x%02x\n", ptr_offset, data);
 	}
 	else if (offset == ZBC_REG_DOORBELL)
 	{
 		// DOORBELL: trigger request processing
-		LOGREG("semihost: write DOORBELL = 0x%02x (triggering request at 0x%016llx)\n",
-		       data, (unsigned long long)m_riff_ptr);
+		LOGREG("semihost: write DOORBELL = 0x%02x (triggering request)\n", data);
 		process_request();
 	}
 	else if (offset == ZBC_REG_IRQ_STATUS)
@@ -311,12 +319,38 @@ void semihost_device::process_request()
 	// Clear response-ready status before processing
 	m_status &= ~ZBC_STATUS_RESPONSE_READY;
 
+	// Extract RIFF address from m_riff_ptr byte array
+	// Use the CPU's address width and endianness for correct interpretation
+	address_space &space = m_cpu->space(AS_PROGRAM);
+	int addr_bits = space.addr_width();
+	int addr_bytes = (addr_bits + 7) / 8;  // Round up to bytes
+	endianness_t endian = space.endianness();
+
+	// Ensure we don't read beyond the 16-byte array
+	if (addr_bytes > 16)
+		addr_bytes = 16;
+
+	// Extract address based on endianness
+	u64 riff_addr = 0;
+	if (endian == ENDIANNESS_LITTLE)
+	{
+		// Little-endian: LSB at lowest address
+		for (int i = 0; i < addr_bytes && i < 8; i++)
+			riff_addr |= u64(m_riff_ptr[i]) << (i * 8);
+	}
+	else
+	{
+		// Big-endian: MSB at lowest address
+		for (int i = 0; i < addr_bytes && i < 8; i++)
+			riff_addr |= u64(m_riff_ptr[i]) << ((addr_bytes - 1 - i) * 8);
+	}
+
+	LOGREQUEST("semihost: process_request addr_bits=%d endian=%s riff_addr=0x%llx\n",
+	           addr_bits, (endian == ENDIANNESS_LITTLE) ? "LE" : "BE",
+	           (unsigned long long)riff_addr);
+
 	// Call C library to process the RIFF request
-	LOGREQUEST("semihost: processing request at address 0x%016llx\n", (unsigned long long)m_riff_ptr);
-
-	int result = zbc_host_process(m_host, m_riff_ptr);
-
-	LOGREQUEST("semihost: request complete, result = %d\n", result);
+	int result = zbc_host_process(m_host, riff_addr);
 
 	// Update status
 	m_status |= ZBC_STATUS_RESPONSE_READY;
