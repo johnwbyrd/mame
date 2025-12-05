@@ -47,6 +47,7 @@
 
 #include "imagedev/snapquik.h"
 #include "m6847drv.h"
+#include "machine/semihost.h"
 #include "video/mc6847.h"
 
 namespace {
@@ -71,7 +72,8 @@ class zbc_state : public driver_device {
   public:
 	zbc_state(const machine_config &mconfig, device_type type, const char *tag)
 	    : driver_device(mconfig, type, tag), m_maincpu(*this, "maincpu"),
-	      m_vdg(*this, "vdg"), m_quickload(*this, "quickload"),
+	      m_vdg(*this, "vdg"), m_semihost(*this, "semihost"),
+	      m_quickload(*this, "quickload"),
 	      m_videoram(*this, "videoram", 0x200, ENDIANNESS_LITTLE) {}
 
 	template <typename DEVICE_TYPE>
@@ -85,12 +87,14 @@ class zbc_state : public driver_device {
 	// Devices
 	required_device<cpu_device> m_maincpu;
 	required_device<mc6847_base_device> m_vdg;
+	required_device<semihost_device> m_semihost;
 	optional_device<quickload_image_device> m_quickload;
 
 	// Memory - byte-granular VRAM access for MC6847
 	memory_share_creator<uint8_t> m_videoram;
 	static constexpr zbc_size_t VRAM_SIZE = 512;  // 32x16 text mode
 	static constexpr zbc_size_t VRAM_MASK = VRAM_SIZE - 1;  // 0x1FF - mask for VRAM indexing
+	static constexpr zbc_size_t SEMIHOST_SIZE = 32;  // Semihost device registers
 
 	// VSync interrupt configuration (JP1 jumper)
 	bool m_vsync_interrupt_enabled = false;
@@ -128,6 +132,13 @@ class zbc_state : public driver_device {
 			return LOAD_ADDR;
 		int addr_bits = m_maincpu->space(AS_PROGRAM).addr_width();
 		return (1ULL << (1 + addr_bits / 2));
+	}
+
+	// Calculate semihost device address - placed just before VRAM.
+	// Device registers are 32 bytes, placed immediately before video RAM.
+	// MUST be called only when address space exists (machine_start(), not mem_map()).
+	zbc_addr_t get_semihost_addr() const {
+		return get_vram_addr() - SEMIHOST_SIZE;
 	}
 
 	// Format memory size in human-readable units (KB, MB, GB)
@@ -241,10 +252,11 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
 
 	// Display memory configuration
 	char addr_buf[64];
+	zbc_addr_t semihost_addr = get_semihost_addr();
 	zbc_addr_t vram_addr = get_vram_addr();
 	zbc_addr_t load_addr = get_load_addr();
-	// Calculate total RAM available for programs (everything before VRAM)
-	zbc_size_t available_ram = vram_addr - load_addr;
+	// Calculate total RAM available for programs (everything before semihost device)
+	zbc_size_t available_ram = semihost_addr - load_addr;
 
 	snprintf(addr_buf, sizeof(addr_buf), "Load address: 0x%llX",
 	         (unsigned long long)load_addr);
@@ -252,6 +264,11 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
 
 	snprintf(addr_buf, sizeof(addr_buf), "Available RAM: %llu bytes",
 	         (unsigned long long)available_ram);
+	m_console.center_line(addr_buf);
+
+	snprintf(addr_buf, sizeof(addr_buf), "Semihost: 0x%llX-0x%llX",
+	         (unsigned long long)semihost_addr,
+	         (unsigned long long)(semihost_addr + SEMIHOST_SIZE - 1));
 	m_console.center_line(addr_buf);
 
 	snprintf(addr_buf, sizeof(addr_buf), "Video RAM: 0x%llX-0x%llX",
@@ -313,7 +330,7 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_start() {
 
 	// === Validate address space is large enough ===
 	const zbc_size_t min_program = 2048; // Minimum program space
-	const zbc_size_t min_required = min_program + VRAM_SIZE;
+	const zbc_size_t min_required = min_program + SEMIHOST_SIZE + VRAM_SIZE;
 
 	if (addr_space_size < min_required) {
 		osd_printf_error("ZBC machine_start: CPU '%s' address space too small\n",
@@ -324,33 +341,60 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_start() {
 		return;
 	}
 
+	// === Calculate semihost device address ===
+	const zbc_addr_t semihost_addr = get_semihost_addr();
+	const zbc_addr_t semihost_end = semihost_addr + SEMIHOST_SIZE - 1;
+
+	// === Install semihost device registers ===
+	osd_printf_verbose("ZBC: Installing semihost device registers\n");
+	osd_printf_verbose("  Range: 0x%llX - 0x%llX\n",
+	                   (unsigned long long)semihost_addr,
+	                   (unsigned long long)semihost_end);
+	space.install_readwrite_handler(semihost_addr, semihost_end,
+	                                read8sm_delegate(*m_semihost, FUNC(semihost_device::read)),
+	                                write8sm_delegate(*m_semihost, FUNC(semihost_device::write)));
+
 	// === Install VRAM over the generic RAM from mem_map() ===
 	// CRITICAL: Must use install_ram()/install_rom() to force byte-granular
 	// access on 16/32-bit CPUs. The MC6847 VDG always reads bytes, but
 	// map().ram() creates CPU-width memory which would cause access issues.
 	if (m_quickload && m_quickload->exists()) {
 		osd_printf_verbose("ZBC: Installing VRAM as R/W (quickload present)\n");
-		osd_printf_verbose("  Range: 0x%X - 0x%X\n", vram_addr, vram_end);
+		osd_printf_verbose("  Range: 0x%llX - 0x%llX\n",
+		                   (unsigned long long)vram_addr,
+		                   (unsigned long long)vram_end);
 		space.install_ram(vram_addr, vram_end, m_videoram.target());
 	} else {
 		osd_printf_verbose("ZBC: Installing VRAM as ROM (boot message protected)\n");
-		osd_printf_verbose("  Range: 0x%X - 0x%X\n", vram_addr, vram_end);
+		osd_printf_verbose("  Range: 0x%llX - 0x%llX\n",
+		                   (unsigned long long)vram_addr,
+		                   (unsigned long long)vram_end);
 		space.install_rom(vram_addr, vram_end, m_videoram.target());
 	}
 
 	// === Log complete memory map for debugging ===
 	osd_printf_verbose("\nZBC Complete Memory Map (%d-bit %s):\n", addr_bits,
 	                   m_maincpu->name());
-	osd_printf_verbose("  0x%X - 0x%X: RAM (0x%X bytes)\n",
-	                   0, vram_addr - 1, vram_addr);
-	osd_printf_verbose("  0x%X - 0x%X: Video RAM (%d bytes)\n",
-	                   vram_addr, vram_end, VRAM_SIZE);
+	osd_printf_verbose("  0x%llX - 0x%llX: RAM (0x%llX bytes)\n",
+	                   (unsigned long long)0,
+	                   (unsigned long long)(semihost_addr - 1),
+	                   (unsigned long long)semihost_addr);
+	osd_printf_verbose("  0x%llX - 0x%llX: Semihost device (%d bytes)\n",
+	                   (unsigned long long)semihost_addr,
+	                   (unsigned long long)semihost_end,
+	                   SEMIHOST_SIZE);
+	osd_printf_verbose("  0x%llX - 0x%llX: Video RAM (%d bytes)\n",
+	                   (unsigned long long)vram_addr,
+	                   (unsigned long long)vram_end,
+	                   VRAM_SIZE);
 	if (vram_end < addr_space_size - 1) {
-		osd_printf_verbose("  0x%X - 0x%X: RAM (0x%X bytes)\n",
-		                   vram_end + 1, addr_space_size - 1,
-		                   addr_space_size - vram_end - 1);
+		osd_printf_verbose("  0x%llX - 0x%llX: RAM (0x%llX bytes)\n",
+		                   (unsigned long long)(vram_end + 1),
+		                   (unsigned long long)(addr_space_size - 1),
+		                   (unsigned long long)(addr_space_size - vram_end - 1));
 	}
-	osd_printf_verbose("  Total RAM: 0x%X bytes\n\n", addr_space_size - VRAM_SIZE);
+	osd_printf_verbose("  Total RAM: 0x%llX bytes\n\n",
+	                   (unsigned long long)(addr_space_size - SEMIHOST_SIZE - VRAM_SIZE));
 
 	// Initialize console with VRAM pointer
 	m_console.set_vram_base(m_videoram.target());
@@ -399,11 +443,11 @@ zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::quickload_cb(
 	}
 
 	const zbc_size_t size = image.length();
-	const zbc_addr_t vram_addr = get_vram_addr();
+	const zbc_addr_t semihost_addr = get_semihost_addr();
 	const zbc_addr_t load_addr = get_load_addr();
 
-	// Validate program fits between load address and video RAM
-	if (size > vram_addr - load_addr)
+	// Validate program fits between load address and semihost device
+	if (size > semihost_addr - load_addr)
 		return std::make_pair(image_error::INVALIDLENGTH, "Program too large");
 
 	// Read into temporary buffer (can't read directly to fragmented address
@@ -443,6 +487,14 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::zbc(
 	// VSync field sync - optionally drives CPU interrupt based on JP1 jumper
 	m_vdg->fsync_wr_callback().set(FUNC(zbc_state::vdg_fsync));
 	m_vdg->input_callback().set(FUNC(zbc_state::vdg_videoram_r));
+
+	// Semihosting device - provides file I/O, console, and time services
+	// Guest programs write RIFF buffer address to RIFF_PTR, then trigger DOORBELL
+	SEMIHOST(config, m_semihost, 0);
+	m_semihost->set_cpu_tag("maincpu");
+	// Semihost completion IRQ on IRQ1 (separate from VSync on IRQ0/NMI)
+	// IRQ is disabled by default - guest must enable via IRQ_ENABLE register
+	m_semihost->irq_callback().set_inputline(m_maincpu, INPUT_LINE_IRQ1);
 
 	QUICKLOAD(config, "quickload", "bin")
 	    .set_load_callback(FUNC(zbc_state::quickload_cb));

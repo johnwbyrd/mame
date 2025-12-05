@@ -75,7 +75,7 @@ Each ZBC system includes:
 
 * **RAM**: Sized automatically based on CPU address space width
 * **MC6847 VDG**: Text display (32x16 characters) at top of address space
-* **Semihosting**: RIFF-based memory-mapped I/O interface (1024 bytes)
+* **Semihosting**: Memory-mapped semihost device (32-byte register interface)
 * **Quickload**: Support for loading headerless binary programs
 * **CPU Init**: Architecture-specific boot code (reset vectors, etc.)
 * **JP1 Jumper**: Configurable VSync interrupt routing (see 2.3)
@@ -194,10 +194,9 @@ This scales the reserved region proportionally with address space:
 
 (unless overridden by VRAM_ADDR template parameter)
 
-**Semihosting Buffer Address**::
+**Semihost Device Address**::
 
-    semihost_addr = reserved_start - 512 - 1024
-                  = reserved_start - 1536
+    semihost_addr = vram_addr - 32
 
 **Available RAM**::
 
@@ -211,15 +210,15 @@ This scales the reserved region proportionally with address space:
 
     reserved_start = 0xFF00
     vram_addr      = 0xFF00 - 512    = 0xFE00
-    semihost_addr  = 0xFF00 - 1536   = 0xFC00
+    semihost_addr  = 0xFE00 - 32     = 0xFDE0
     ram_start      = 0x0200
-    ram_end        = 0xFBFF
-    available_ram  = 0xFC00 - 0x0200 = 63,488 bytes
+    ram_end        = 0xFDDF
+    available_ram  = 0xFDE0 - 0x0200 = 64,480 bytes
 
     Memory Map:
     0x0000-0x01FF   Low memory (zero page, vectors, stack)
-    0x0200-0xFBFF   Available RAM (63,488 bytes)
-    0xFC00-0xFDFF   Semihosting buffer (1024 bytes)
+    0x0200-0xFDDF   Available RAM (64,480 bytes)
+    0xFDE0-0xFDFF   Semihost device (32 bytes)
     0xFE00-0xFEFF   Video RAM (512 bytes)
     0xFF00-0xFFFF   Reserved region (256 bytes)
 
@@ -229,15 +228,15 @@ This scales the reserved region proportionally with address space:
 
     reserved_start = 0xFFFF0000
     vram_addr      = 0xFFFF0000 - 512  = 0xFFFFFE00
-    semihost_addr  = 0xFFFF0000 - 1536 = 0xFFFFFA00
+    semihost_addr  = 0xFFFFFE00 - 32   = 0xFFFFFDE0
     ram_start      = 0x00000200
-    ram_end        = 0xFFFFF9FF
-    available_ram  = 0xFFFFFA00 - 0x200 = 4,294,965,760 bytes (~4GB)
+    ram_end        = 0xFFFFFDDF
+    available_ram  = 0xFFFFFDE0 - 0x200 = 4,294,966,752 bytes (~4GB)
 
     Memory Map:
     0x00000000-0x000001FF   Low memory (vectors, boot code)
-    0x00000200-0xFFFFF9FF   Available RAM (~4GB)
-    0xFFFFFA00-0xFFFFFDFF   Semihosting buffer (1024 bytes)
+    0x00000200-0xFFFFFDDF   Available RAM (~4GB)
+    0xFFFFFDE0-0xFFFFFDFF   Semihost device (32 bytes)
     0xFFFFFE00-0xFFFFFFFF   Video RAM (512 bytes)
     0xFFFF0000-0xFFFFFFFF   Reserved region (65,536 bytes)
 
@@ -559,54 +558,93 @@ display for system information including memory addresses.
 7.1 RIFF-Based Semihosting
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The ZBC system includes full semihosting support via the MAME semihosting plugin.
-Each ZBC variant includes a 1024-byte memory-mapped semihosting buffer placed
+The ZBC system includes built-in semihosting support via a memory-mapped device.
+Each ZBC variant includes a 32-byte semihost device register block placed
 just before video RAM (calculated dynamically based on address space size).
 
-The semihosting plugin must be enabled::
+Semihosting is always available - no plugins or command-line options required::
 
-    mame zbcm6502 -quik program.bin -plugin semihost
+    mame zbcm6502 -quik program.bin
 
-7.2 Semihosting Memory Layout
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+7.2 Semihost Device Register Map
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The semihosting buffer address is calculated as::
+The semihost device occupies 32 bytes of address space::
 
-    semihost_addr = get_reserved_start() - 512 - 1024
+    Offset  Size  Name        Access  Description
+    0x00    8     SIGNATURE   R       ASCII "SEMIHOST" (device detection)
+    0x08    16    RIFF_PTR    RW      Pointer to RIFF buffer (native endian)
+    0x18    1     DOORBELL    W       Write triggers request processing
+    0x19    1     IRQ_STATUS  R       Bit 0: response ready, Bit 1: error
+    0x1A    1     IRQ_ENABLE  RW      Bit 0: enable IRQ on response (default 0)
+    0x1B    1     IRQ_ACK     W       Write 1 to clear IRQ bits
+    0x1C    1     STATUS      R       Bit 0: response ready, Bit 7: device present
+    0x1D-1F 3     (reserved)  -       Padding to 32 bytes
 
-For a 16-bit CPU, this places the buffer at 0xFC00-0xFDFF.
+For a 16-bit CPU, the device is at 0xFDE0-0xFDFF.
 
-Programs can use RIFF-based semihosting calls to:
-  * Write debug output to console
-  * Read/write files on the host filesystem (sandboxed)
-  * Get system time and clock information
-  * Exit cleanly
+7.3 Request Flow
+~~~~~~~~~~~~~~~~
 
-See ``plugins/semihost/README.md`` for complete semihosting protocol details.
+1. Guest allocates RIFF buffer anywhere in RAM
+2. Guest builds RIFF request (CNFG + CALL chunks) in buffer
+3. Guest writes buffer address to RIFF_PTR (offset 0x08)
+4. Guest writes any value to DOORBELL (offset 0x18)
+5. Device processes request synchronously
+6. Device sets STATUS bit 0 (response ready)
+7. Guest reads response from RIFF buffer
 
-7.3 Example Semihosting Usage
+Programs can use semihosting calls to:
+
+* Write debug output to console (SYS_WRITE0, SYS_WRITEC)
+* Read/write files on the host filesystem (sandboxed to ~/.mame/semihost/)
+* Get system time and clock information
+* Exit cleanly
+
+7.4 Interrupt Support
+~~~~~~~~~~~~~~~~~~~~~
+
+The semihost device can optionally generate an IRQ when a request completes.
+This is **disabled by default** - guest programs must explicitly opt-in by
+writing to the IRQ_ENABLE register.
+
+Semihost completion uses IRQ1, separate from the VSync interrupt (IRQ0/NMI
+controlled by JP1 jumper). This allows programs to use either or both
+interrupt sources independently.
+
+7.5 Example Semihosting Usage
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 6502 assembly example (write "Hello" to console)::
 
-    ; Semihosting buffer at 0xFC00 (16-bit CPU)
-    SEMIHOST = $FC00
+    ; Semihost device at 0xFDE0 (16-bit CPU)
+    SEMIHOST    = $FDE0
+    RIFF_BUF    = $0300      ; RIFF buffer in RAM
 
-    ; Write RIFF header
-    LDA #'R'
-    STA SEMIHOST+0   ; 'RIFF'
-    LDA #'I'
-    STA SEMIHOST+1
-    ; ... (set up RIFF structure)
+    ; Build RIFF request at RIFF_BUF
+    ; ... (set up CNFG and CALL chunks with SYS_WRITE0)
 
-    ; Write CALL chunk with SYS_WRITE0 (0x04)
-    LDA #$04
-    STA SEMIHOST+$18  ; Opcode
+    ; Write buffer address to RIFF_PTR (16-bit, little-endian)
+    LDA #<RIFF_BUF
+    STA SEMIHOST+$08
+    LDA #>RIFF_BUF
+    STA SEMIHOST+$09
+    LDA #0
+    STA SEMIHOST+$0A    ; Clear upper bytes
+    ; ... (clear bytes 0x0B-0x17)
 
-    ; Trigger semihosting by writing complete RIFF structure
-    ; Plugin polls memory each frame
+    ; Trigger semihosting
+    STA SEMIHOST+$18    ; Write to DOORBELL
 
-See semihosting plugin documentation for complete protocol details.
+    ; Poll for completion
+wait:
+    LDA SEMIHOST+$1C    ; Read STATUS
+    AND #$01            ; Check response ready bit
+    BEQ wait
+
+    ; Response is now in RIFF_BUF
+
+See the ZBC semihosting protocol specification for complete details.
 
 
 8. Usage Examples
@@ -617,11 +655,11 @@ See semihosting plugin documentation for complete protocol details.
 
 ::
 
-    # Run 6502 ZBC system
+    # Run 6502 ZBC system (semihosting always available)
     mame zbcm6502 -quik program.bin
 
-    # Run Z80 ZBC system with semihosting
-    mame zbcz80 -quik program.bin -plugin semihost
+    # Run Z80 ZBC system
+    mame zbcz80 -quik program.bin
 
     # Run 68000 ZBC system
     mame zbcm68000 -quik program.bin
@@ -631,7 +669,7 @@ executed. The MC6847 display shows system information on boot, including:
   * CPU name
   * Load address
   * Available RAM size
-  * Semihosting buffer address range
+  * Semihost device address range
   * Video RAM address range
 
 8.2 Writing Test Programs
@@ -707,7 +745,7 @@ CPUs excluded from ZBC coverage:
 Planned improvements:
 
 * **Performance benchmarking**: Standardized test suite to compare CPU emulation speed
-* **Extended semihosting**: Additional syscalls for file I/O, networking
+* **Extended semihosting**: Additional syscalls for networking, debugging
 * **Conflict resolution**: Better handling of CPUs with conflicting macro definitions
 * **Custom configurations**: Support for CPUs requiring special machine_config setup
 * **Automated regression testing**: CI integration for detecting CPU emulation bugs

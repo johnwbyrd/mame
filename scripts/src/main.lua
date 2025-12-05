@@ -162,6 +162,7 @@ end
 		"ymfm",
 		ext_lib("jpeg"),
 		"7z",
+		"semihost",
 	}
 if CPU_INCLUDE_DRC_NATIVE then
 	links {

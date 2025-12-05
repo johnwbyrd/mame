@@ -2080,3 +2080,33 @@ project "asmjit"
 		MAME_DIR .. "3rdparty/asmjit/asmjit/x86/x86rapass_p.h",
 	}
 end
+
+
+--------------------------------------------------
+-- semihost library (ZBC semihosting support)
+--------------------------------------------------
+
+project "semihost"
+	uuid "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+	kind "StaticLib"
+
+	defines {
+		"ZBC_HOST",
+	}
+
+	includedirs {
+		MAME_DIR .. "3rdparty/semihost/include",
+		MAME_DIR .. "3rdparty/semihost/src",
+	}
+
+	configuration { }
+
+	files {
+		MAME_DIR .. "3rdparty/semihost/src/zbc_host.c",
+		MAME_DIR .. "3rdparty/semihost/src/zbc_opcode_table.c",
+		MAME_DIR .. "3rdparty/semihost/src/zbc_riff.c",
+		MAME_DIR .. "3rdparty/semihost/src/zbc_backend_dummy.c",
+		MAME_DIR .. "3rdparty/semihost/src/zbc_ansi_common.c",
+		MAME_DIR .. "3rdparty/semihost/src/zbc_ansi_secure.c",
+		MAME_DIR .. "3rdparty/semihost/src/zbc_ansi_insecure.c",
+	}
