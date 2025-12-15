@@ -48,7 +48,7 @@ static int dummy_seek(void *ctx, int fd, int pos)
     return 0;
 }
 
-static int dummy_flen(void *ctx, int fd)
+static intmax_t dummy_flen(void *ctx, int fd)
 {
     (void)ctx;
     (void)fd;
@@ -167,8 +167,8 @@ static int dummy_get_cmdline(void *ctx, char *buf, size_t buf_size)
 }
 
 static int dummy_heapinfo(void *ctx,
-                          unsigned int *heap_base, unsigned int *heap_limit,
-                          unsigned int *stack_base, unsigned int *stack_limit)
+                          uintptr_t *heap_base, uintptr_t *heap_limit,
+                          uintptr_t *stack_base, uintptr_t *stack_limit)
 {
     (void)ctx;
     *heap_base = 0;

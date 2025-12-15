@@ -39,7 +39,7 @@ void zbc_host_init(zbc_host_state_t *state,
  * Guest memory access
  *========================================================================*/
 
-static void read_guest(zbc_host_state_t *state, void *dest, uint64_t addr,
+static void read_guest(zbc_host_state_t *state, void *dest, uintptr_t addr,
                        size_t size)
 {
     if (state->mem_ops.read_block) {
@@ -53,7 +53,7 @@ static void read_guest(zbc_host_state_t *state, void *dest, uint64_t addr,
     }
 }
 
-static void write_guest(zbc_host_state_t *state, uint64_t addr,
+static void write_guest(zbc_host_state_t *state, uintptr_t addr,
                         const void *src, size_t size)
 {
     if (state->mem_ops.write_block) {
@@ -71,222 +71,241 @@ static void write_guest(zbc_host_state_t *state, uint64_t addr,
  * Value conversion (guest endianness)
  *========================================================================*/
 
-int zbc_host_read_guest_int(const zbc_host_state_t *state,
-                            const uint8_t *data, size_t size)
+intptr_t zbc_host_read_guest_int(const zbc_host_state_t *state,
+                                 const uint8_t *data, size_t size)
 {
     return zbc_read_native_int(data, (int)size, state->guest_endianness);
 }
 
 void zbc_host_write_guest_int(const zbc_host_state_t *state,
-                              uint8_t *data, int value, size_t size)
+                              uint8_t *data, uintptr_t value, size_t size)
 {
-    zbc_write_native_uint(data, (unsigned int)value, (int)size,
-                          state->guest_endianness);
+    zbc_write_native_uint(data, value, (int)size, state->guest_endianness);
 }
 
 /*========================================================================
  * Response building
+ *
+ * The client pre-allocates RETN and ERRO chunks. The host writes only
+ * the payload contents within those pre-allocated bounds. The RIFF
+ * structure is never modified by the host.
  *========================================================================*/
 
-static void write_erro(zbc_host_state_t *state, uint64_t addr, int error_code)
+/*
+ * Write ERRO payload to pre-allocated ERRO chunk.
+ * Only writes the payload (error_code + reserved), not the chunk header.
+ */
+static void write_erro_payload(zbc_host_state_t *state, uintptr_t riff_addr,
+                               const zbc_parsed_t *parsed, int error_code)
 {
-    uint8_t erro[12];
-    size_t offset;
+    uint8_t buf[ZBC_ERRO_PAYLOAD_SIZE];
 
-    ZBC_WRITE_U32_LE(erro, ZBC_ID_ERRO);
-    ZBC_WRITE_U32_LE(erro + 4, 4);
-    ZBC_WRITE_U16_LE(erro + 8, (uint16_t)error_code);
-    erro[10] = 0;
-    erro[11] = 0;
-
-    offset = ZBC_HDR_SIZE;
-    if (state->cnfg_received) {
-        offset += ZBC_CNFG_TOTAL_SIZE;
+    if (!parsed->has_erro || parsed->erro_payload_capacity < ZBC_ERRO_PAYLOAD_SIZE) {
+        ZBC_LOG_ERROR_S("write_erro_payload: no pre-allocated ERRO chunk");
+        return;
     }
 
-    write_guest(state, addr + offset, erro, 12);
+    /* ERRO payload: error_code(2) + reserved(2) */
+    ZBC_WRITE_U16_LE(buf, (uint16_t)error_code);
+    buf[2] = 0;
+    buf[3] = 0;
+
+    write_guest(state, riff_addr + parsed->erro_payload_offset, buf, ZBC_ERRO_PAYLOAD_SIZE);
 }
 
-static void write_retn(zbc_host_state_t *state, uint64_t addr,
-                       int result, int err,
-                       const void *data, size_t data_size)
+/*
+ * Write RETN payload to pre-allocated RETN chunk.
+ * Only writes the payload contents, not the chunk header.
+ */
+static void write_retn_payload(zbc_host_state_t *state, uintptr_t riff_addr,
+                               const zbc_parsed_t *parsed,
+                               intptr_t result, int err,
+                               const void *data, size_t data_size)
 {
-    uint8_t buf[64];
-    size_t offset;
-    size_t write_pos;
-    size_t retn_size;
+    uint8_t buf[256];
+    size_t pos;
     int int_size;
+    size_t i;
+    const uint8_t *src;
+
+    if (!parsed->has_retn) {
+        ZBC_LOG_ERROR_S("write_retn_payload: no pre-allocated RETN chunk");
+        return;
+    }
 
     int_size = state->guest_int_size;
-    retn_size = int_size + 4;  /* result + errno */
+    pos = 0;
 
+    /* RETN payload: result[int_size] + errno[ZBC_RETN_ERRNO_SIZE] */
+    zbc_host_write_guest_int(state, buf + pos, (uintptr_t)result, int_size);
+    pos += (size_t)int_size;
+    ZBC_WRITE_U32_LE(buf + pos, (uint32_t)err);
+    pos += ZBC_RETN_ERRNO_SIZE;
+
+    /* Add DATA sub-chunk if present */
     if (data && data_size > 0) {
-        retn_size += ZBC_CHUNK_HDR_SIZE + 4 + ZBC_PAD_SIZE(data_size);
-    }
+        size_t data_payload_size = ZBC_DATA_HDR_SIZE + data_size;
+        size_t padded_size = ZBC_PAD_SIZE(data_payload_size);
 
-    /* RETN header */
-    ZBC_WRITE_U32_LE(buf, ZBC_ID_RETN);
-    ZBC_WRITE_U32_LE(buf + 4, (uint32_t)retn_size);
+        /* DATA chunk header */
+        ZBC_WRITE_U32_LE(buf + pos, ZBC_ID_DATA);
+        pos += 4;
+        ZBC_WRITE_U32_LE(buf + pos, (uint32_t)data_payload_size);
+        pos += 4;
 
-    /* Result in guest endianness */
-    zbc_host_write_guest_int(state, buf + 8, result, int_size);
+        /* DATA payload: type + reserved + data */
+        buf[pos] = ZBC_DATA_TYPE_BINARY;
+        buf[pos + 1] = 0;
+        buf[pos + 2] = 0;
+        buf[pos + 3] = 0;
+        pos += ZBC_DATA_HDR_SIZE;
 
-    /* Errno in little-endian */
-    ZBC_WRITE_U32_LE(buf + 8 + int_size, (uint32_t)err);
+        src = (const uint8_t *)data;
+        for (i = 0; i < data_size; i++) {
+            buf[pos + i] = src[i];
+        }
+        pos += data_size;
 
-    write_pos = 8 + int_size + 4;
-
-    /* Write RETN header */
-    offset = ZBC_HDR_SIZE;
-    if (state->cnfg_received) {
-        offset += ZBC_CNFG_TOTAL_SIZE;
-    }
-
-    write_guest(state, addr + offset, buf, write_pos);
-
-    /* Write DATA sub-chunk if present */
-    if (data && data_size > 0) {
-        uint8_t data_hdr[12];
-        size_t chunk_size = 4 + data_size;
-
-        ZBC_WRITE_U32_LE(data_hdr, ZBC_ID_DATA);
-        ZBC_WRITE_U32_LE(data_hdr + 4, (uint32_t)chunk_size);
-        data_hdr[8] = ZBC_DATA_TYPE_BINARY;
-        data_hdr[9] = 0;
-        data_hdr[10] = 0;
-        data_hdr[11] = 0;
-
-        write_guest(state, addr + offset + write_pos, data_hdr, 12);
-        write_guest(state, addr + offset + write_pos + 12, data, data_size);
-
-        if (chunk_size & 1) {
-            uint8_t pad = 0;
-            write_guest(state, addr + offset + write_pos + 12 + data_size, &pad, 1);
+        /* Pad to even boundary if needed */
+        if (padded_size > data_payload_size) {
+            buf[pos] = 0;
+            pos++;
         }
     }
+
+    /* Check capacity before writing */
+    if (pos > parsed->retn_payload_capacity) {
+        ZBC_LOG_ERROR("write_retn_payload: response %u exceeds capacity %u",
+                     (unsigned)pos, (unsigned)parsed->retn_payload_capacity);
+        return;
+    }
+
+    write_guest(state, riff_addr + parsed->retn_payload_offset, buf, pos);
 }
 
-/*========================================================================
- * Parsed request context
- *========================================================================*/
+/*
+ * Write ERRO chunk for early errors (before parsing completes).
+ * This is the fallback when we can't use the pre-allocated chunk.
+ * It overwrites at the first chunk position - not ideal but necessary
+ * for protocol errors that prevent parsing the RIFF structure.
+ */
+static void write_erro_early(zbc_host_state_t *state, uintptr_t addr, int error_code)
+{
+    uint8_t buf[ZBC_CHUNK_HDR_SIZE + ZBC_ERRO_PAYLOAD_SIZE];
 
-#define MAX_PARMS 8
-#define MAX_DATA  4
+    /* Build ERRO chunk: id + size + payload */
+    ZBC_WRITE_U32_LE(buf, ZBC_ID_ERRO);
+    ZBC_WRITE_U32_LE(buf + 4, ZBC_ERRO_PAYLOAD_SIZE);
+    ZBC_WRITE_U16_LE(buf + 8, (uint16_t)error_code);
+    buf[10] = 0;
+    buf[11] = 0;
 
-typedef struct {
-    int opcode;
-    int parm_count;
-    int parms[MAX_PARMS];
-    int data_count;
-    struct {
-        uint8_t *ptr;
-        size_t size;
-    } data[MAX_DATA];
-} parsed_call_t;
+    /* Write at fixed offset - this is a fallback for parse failures */
+    write_guest(state, addr + ZBC_RIFF_HDR_SIZE, buf, sizeof(buf));
+}
 
 /*========================================================================
  * Request parsing
+ *
+ * Uses the unified zbc_riff_parse() to extract all fields at once.
  *========================================================================*/
 
-static int parse_request(zbc_host_state_t *state, uint64_t riff_addr,
-                         parsed_call_t *call)
+static int parse_request(zbc_host_state_t *state, uintptr_t riff_addr,
+                         zbc_parsed_t *parsed)
 {
     uint8_t *buf = state->work_buf;
     size_t capacity = state->work_buf_size;
-    uint32_t chunk_id, chunk_size, riff_size;
-    size_t offset, sub_offset, call_end;
+    size_t riff_total_size;
+    uint32_t riff_size;
+    int rc;
 
-    /* Read RIFF header */
-    read_guest(state, buf, riff_addr, ZBC_HDR_SIZE);
+    /* Read RIFF header first to get size */
+    read_guest(state, buf, riff_addr, ZBC_RIFF_HDR_SIZE);
 
-    if (zbc_riff_validate_container(buf, capacity, ZBC_ID_SEMI) < 0) {
-        write_erro(state, riff_addr, ZBC_PROTO_ERR_MALFORMED_RIFF);
-        return -1;
+    /* Check magic and get size */
+    if (ZBC_READ_U32_LE(buf) != ZBC_ID_RIFF) {
+        ZBC_LOG_ERROR_S("parse_request: bad RIFF magic");
+        write_erro_early(state, riff_addr, ZBC_PROTO_ERR_MALFORMED_RIFF);
+        return ZBC_ERR_PARSE_ERROR;
     }
 
     riff_size = ZBC_READ_U32_LE(buf + 4);
-    if (riff_size + 8 > capacity) {
-        return ZBC_ERR_BUFFER_TOO_SMALL;
+    riff_total_size = 4 + 4 + riff_size;
+
+    if (riff_total_size > capacity) {
+        ZBC_LOG_ERROR("parse_request: RIFF size=%u exceeds work_buf=%u",
+                 (unsigned)riff_total_size, (unsigned)capacity);
+        return ZBC_ERR_BUFFER_FULL;
     }
 
     /* Read entire RIFF structure */
-    read_guest(state, buf, riff_addr, riff_size + 8);
+    read_guest(state, buf, riff_addr, riff_total_size);
 
-    offset = ZBC_HDR_SIZE;
+    /* Parse everything at once */
+    rc = zbc_riff_parse(parsed, buf, riff_total_size,
+                        state->guest_int_size, state->guest_endianness);
+    if (rc != ZBC_OK) {
+        ZBC_LOG_ERROR("parse_request: zbc_riff_parse failed (%d)", rc);
+        write_erro_early(state, riff_addr, ZBC_PROTO_ERR_MALFORMED_RIFF);
+        return ZBC_ERR_PARSE_ERROR;
+    }
 
-    /* Check for CNFG */
-    if (zbc_riff_read_header(buf, capacity, offset, &chunk_id, &chunk_size) == 0) {
-        if (chunk_id == ZBC_ID_CNFG && chunk_size >= ZBC_CNFG_DATA_SIZE) {
-            state->guest_int_size = buf[offset + 8];
-            state->guest_ptr_size = buf[offset + 9];
-            state->guest_endianness = buf[offset + 10];
-            state->cnfg_received = 1;
-            offset += ZBC_CHUNK_HDR_SIZE + ZBC_PAD_SIZE(chunk_size);
-        }
+    /* Update state from CNFG if present */
+    if (parsed->has_cnfg) {
+        state->guest_int_size = parsed->int_size;
+        state->guest_ptr_size = parsed->ptr_size;
+        state->guest_endianness = parsed->endianness;
+        state->cnfg_received = 1;
+        ZBC_LOG_INFO("CNFG: int_size=%u ptr_size=%u endian=%u",
+                 (unsigned)parsed->int_size, (unsigned)parsed->ptr_size,
+                 (unsigned)parsed->endianness);
     }
 
     if (!state->cnfg_received) {
-        write_erro(state, riff_addr, ZBC_PROTO_ERR_MISSING_CNFG);
-        return -1;
-    }
-
-    /* Parse CALL chunk */
-    if (zbc_riff_read_header(buf, capacity, offset, &chunk_id, &chunk_size) < 0 ||
-        chunk_id != ZBC_ID_CALL) {
-        write_erro(state, riff_addr, ZBC_PROTO_ERR_INVALID_CHUNK);
-        return -1;
-    }
-
-    call->opcode = buf[offset + 8];
-    call->parm_count = 0;
-    call->data_count = 0;
-
-    /* Parse PARM and DATA sub-chunks */
-    sub_offset = offset + ZBC_CALL_HDR_SIZE;
-    call_end = offset + ZBC_CHUNK_HDR_SIZE + chunk_size;
-
-    while (sub_offset + ZBC_CHUNK_HDR_SIZE <= call_end) {
-        uint32_t sub_id = ZBC_READ_U32_LE(buf + sub_offset);
-        uint32_t sub_size = ZBC_READ_U32_LE(buf + sub_offset + 4);
-
-        if (sub_id == ZBC_ID_PARM && call->parm_count < MAX_PARMS && sub_size >= 4) {
-            int value_size = (buf[sub_offset + 8] == ZBC_PARM_TYPE_PTR) ?
-                             state->guest_ptr_size : state->guest_int_size;
-            if (sub_size >= 4 + (uint32_t)value_size) {
-                call->parms[call->parm_count] = zbc_host_read_guest_int(
-                    state, buf + sub_offset + 12, value_size);
-                call->parm_count++;
-            }
-        } else if (sub_id == ZBC_ID_DATA && call->data_count < MAX_DATA && sub_size >= 4) {
-            call->data[call->data_count].ptr = buf + sub_offset + 12;
-            call->data[call->data_count].size = sub_size - 4;
-            call->data_count++;
+        ZBC_LOG_ERROR_S("parse_request: missing CNFG chunk");
+        /* At this point parsing succeeded, so we can try the pre-allocated ERRO */
+        if (parsed->has_erro) {
+            write_erro_payload(state, riff_addr, parsed, ZBC_PROTO_ERR_MISSING_CNFG);
+        } else {
+            write_erro_early(state, riff_addr, ZBC_PROTO_ERR_MISSING_CNFG);
         }
-
-        sub_offset += ZBC_CHUNK_HDR_SIZE + ZBC_PAD_SIZE(sub_size);
+        return ZBC_ERR_PARSE_ERROR;
     }
 
-    return 0;
+    if (!parsed->has_call) {
+        ZBC_LOG_ERROR_S("parse_request: missing CALL chunk");
+        if (parsed->has_erro) {
+            write_erro_payload(state, riff_addr, parsed, ZBC_PROTO_ERR_INVALID_CHUNK);
+        } else {
+            write_erro_early(state, riff_addr, ZBC_PROTO_ERR_INVALID_CHUNK);
+        }
+        return ZBC_ERR_PARSE_ERROR;
+    }
+
+    return ZBC_OK;
 }
 
 /*========================================================================
  * Backend dispatch
  *========================================================================*/
 
-int zbc_host_process(zbc_host_state_t *state, uint64_t riff_addr)
+int zbc_host_process(zbc_host_state_t *state, uintptr_t riff_addr)
 {
-    parsed_call_t call;
+    zbc_parsed_t parsed;
     const zbc_backend_t *be;
     void *ctx;
-    int result = 0;
+    intptr_t result = 0;
     int err = 0;
+    int rc;
 
     if (!state || !state->work_buf || !state->backend) {
+        ZBC_LOG_ERROR_S("zbc_host_process: invalid arguments");
         return ZBC_ERR_INVALID_ARG;
     }
 
-    if (parse_request(state, riff_addr, &call) < 0) {
-        return ZBC_ERR_PARSE_ERROR;
+    rc = parse_request(state, riff_addr, &parsed);
+    if (rc != ZBC_OK) {
+        return rc;
     }
 
     be = state->backend;
@@ -305,14 +324,14 @@ int zbc_host_process(zbc_host_state_t *state, uint64_t riff_addr)
      * slightly different parameter extraction and validation.
      */
 
-    switch (call.opcode) {
+    switch (parsed.opcode) {
 
     /* File operations */
 
     case SH_SYS_OPEN:
-        if (be->open && call.data_count > 0 && call.parm_count >= 2) {
-            result = be->open(ctx, (const char *)call.data[0].ptr,
-                              call.data[0].size, call.parms[0]);
+        if (be->open && parsed.data_count > 0 && parsed.parm_count >= 2) {
+            result = be->open(ctx, (const char *)parsed.data[0].ptr,
+                              parsed.data[0].size, parsed.parms[0]);
             if (result < 0 && be->get_errno) {
                 err = be->get_errno(ctx);
             }
@@ -320,12 +339,12 @@ int zbc_host_process(zbc_host_state_t *state, uint64_t riff_addr)
             result = -1;
             err = ENOSYS;
         }
-        write_retn(state, riff_addr, result, err, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, result, err, NULL, 0);
         break;
 
     case SH_SYS_CLOSE:
-        if (be->close && call.parm_count >= 1) {
-            result = be->close(ctx, call.parms[0]);
+        if (be->close && parsed.parm_count >= 1) {
+            result = be->close(ctx, parsed.parms[0]);
             if (result < 0 && be->get_errno) {
                 err = be->get_errno(ctx);
             }
@@ -333,13 +352,13 @@ int zbc_host_process(zbc_host_state_t *state, uint64_t riff_addr)
             result = -1;
             err = ENOSYS;
         }
-        write_retn(state, riff_addr, result, err, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, result, err, NULL, 0);
         break;
 
     case SH_SYS_WRITE:
-        if (be->write && call.parm_count >= 2 && call.data_count > 0) {
-            result = be->write(ctx, call.parms[0],
-                               call.data[0].ptr, call.data[0].size);
+        if (be->write && parsed.parm_count >= 2 && parsed.data_count > 0) {
+            result = be->write(ctx, parsed.parms[0],
+                               parsed.data[0].ptr, parsed.data[0].size);
             if (result < 0 && be->get_errno) {
                 err = be->get_errno(ctx);
             }
@@ -347,12 +366,12 @@ int zbc_host_process(zbc_host_state_t *state, uint64_t riff_addr)
             result = -1;
             err = ENOSYS;
         }
-        write_retn(state, riff_addr, result, err, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, result, err, NULL, 0);
         break;
 
     case SH_SYS_READ:
-        if (be->read && call.parm_count >= 2) {
-            size_t count = (size_t)call.parms[1];
+        if (be->read && parsed.parm_count >= 2) {
+            size_t count = (size_t)parsed.parms[1];
             uint8_t *read_buf = state->work_buf + state->work_buf_size / 2;
             size_t max_read = state->work_buf_size / 2;
 
@@ -360,23 +379,23 @@ int zbc_host_process(zbc_host_state_t *state, uint64_t riff_addr)
                 count = max_read;
             }
 
-            result = be->read(ctx, call.parms[0], read_buf, count);
+            result = be->read(ctx, parsed.parms[0], read_buf, count);
             if (result < 0 && be->get_errno) {
                 err = be->get_errno(ctx);
-                write_retn(state, riff_addr, result, err, NULL, 0);
+                write_retn_payload(state, riff_addr, &parsed, result, err, NULL, 0);
             } else {
                 /* result = bytes NOT read */
                 size_t bytes_read = count - (size_t)result;
-                write_retn(state, riff_addr, result, 0, read_buf, bytes_read);
+                write_retn_payload(state, riff_addr, &parsed, result, 0, read_buf, bytes_read);
             }
         } else {
-            write_retn(state, riff_addr, -1, ENOSYS, NULL, 0);
+            write_retn_payload(state, riff_addr, &parsed, -1, ENOSYS, NULL, 0);
         }
         break;
 
     case SH_SYS_SEEK:
-        if (be->seek && call.parm_count >= 2) {
-            result = be->seek(ctx, call.parms[0], call.parms[1]);
+        if (be->seek && parsed.parm_count >= 2) {
+            result = be->seek(ctx, parsed.parms[0], parsed.parms[1]);
             if (result < 0 && be->get_errno) {
                 err = be->get_errno(ctx);
             }
@@ -384,12 +403,12 @@ int zbc_host_process(zbc_host_state_t *state, uint64_t riff_addr)
             result = -1;
             err = ENOSYS;
         }
-        write_retn(state, riff_addr, result, err, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, result, err, NULL, 0);
         break;
 
     case SH_SYS_FLEN:
-        if (be->flen && call.parm_count >= 1) {
-            result = be->flen(ctx, call.parms[0]);
+        if (be->flen && parsed.parm_count >= 1) {
+            result = be->flen(ctx, parsed.parms[0]);
             if (result < 0 && be->get_errno) {
                 err = be->get_errno(ctx);
             }
@@ -397,22 +416,22 @@ int zbc_host_process(zbc_host_state_t *state, uint64_t riff_addr)
             result = -1;
             err = ENOSYS;
         }
-        write_retn(state, riff_addr, result, err, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, result, err, NULL, 0);
         break;
 
     case SH_SYS_ISTTY:
-        if (be->istty && call.parm_count >= 1) {
-            result = be->istty(ctx, call.parms[0]);
+        if (be->istty && parsed.parm_count >= 1) {
+            result = be->istty(ctx, parsed.parms[0]);
         } else {
             result = 0;
         }
-        write_retn(state, riff_addr, result, 0, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, result, 0, NULL, 0);
         break;
 
     case SH_SYS_REMOVE:
-        if (be->remove && call.data_count > 0) {
-            result = be->remove(ctx, (const char *)call.data[0].ptr,
-                                call.data[0].size);
+        if (be->remove && parsed.data_count > 0) {
+            result = be->remove(ctx, (const char *)parsed.data[0].ptr,
+                                parsed.data[0].size);
             if (result < 0 && be->get_errno) {
                 err = be->get_errno(ctx);
             }
@@ -420,14 +439,14 @@ int zbc_host_process(zbc_host_state_t *state, uint64_t riff_addr)
             result = -1;
             err = ENOSYS;
         }
-        write_retn(state, riff_addr, result, err, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, result, err, NULL, 0);
         break;
 
     case SH_SYS_RENAME:
-        if (be->rename && call.data_count >= 2) {
+        if (be->rename && parsed.data_count >= 2) {
             result = be->rename(ctx,
-                                (const char *)call.data[0].ptr, call.data[0].size,
-                                (const char *)call.data[1].ptr, call.data[1].size);
+                                (const char *)parsed.data[0].ptr, parsed.data[0].size,
+                                (const char *)parsed.data[1].ptr, parsed.data[1].size);
             if (result < 0 && be->get_errno) {
                 err = be->get_errno(ctx);
             }
@@ -435,12 +454,12 @@ int zbc_host_process(zbc_host_state_t *state, uint64_t riff_addr)
             result = -1;
             err = ENOSYS;
         }
-        write_retn(state, riff_addr, result, err, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, result, err, NULL, 0);
         break;
 
     case SH_SYS_TMPNAM:
-        if (be->tmpnam && call.parm_count >= 2) {
-            size_t maxlen = (size_t)call.parms[1];
+        if (be->tmpnam && parsed.parm_count >= 2) {
+            size_t maxlen = (size_t)parsed.parms[1];
             char *tmp_buf = (char *)(state->work_buf + state->work_buf_size / 2);
             size_t max_tmp = state->work_buf_size / 2;
 
@@ -448,108 +467,99 @@ int zbc_host_process(zbc_host_state_t *state, uint64_t riff_addr)
                 maxlen = max_tmp;
             }
 
-            result = be->tmpnam(ctx, tmp_buf, maxlen, call.parms[0]);
+            result = be->tmpnam(ctx, tmp_buf, maxlen, parsed.parms[0]);
             if (result == 0) {
                 size_t len = zbc_strlen(tmp_buf) + 1;
-                write_retn(state, riff_addr, 0, 0, tmp_buf, len);
+                write_retn_payload(state, riff_addr, &parsed, 0, 0, tmp_buf, len);
             } else {
                 if (be->get_errno) {
                     err = be->get_errno(ctx);
                 }
-                write_retn(state, riff_addr, -1, err, NULL, 0);
+                write_retn_payload(state, riff_addr, &parsed, -1, err, NULL, 0);
             }
         } else {
-            write_retn(state, riff_addr, -1, ENOSYS, NULL, 0);
+            write_retn_payload(state, riff_addr, &parsed, -1, ENOSYS, NULL, 0);
         }
         break;
 
     /* Console operations */
 
     case SH_SYS_WRITEC:
-        if (be->writec && call.data_count > 0 && call.data[0].size > 0) {
-            be->writec(ctx, call.data[0].ptr[0]);
+        if (be->writec && parsed.data_count > 0 && parsed.data[0].size > 0) {
+            be->writec(ctx, parsed.data[0].ptr[0]);
         }
-        write_retn(state, riff_addr, 0, 0, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, 0, 0, NULL, 0);
         break;
 
     case SH_SYS_WRITE0:
-        if (be->write0 && call.data_count > 0) {
-            /* Ensure null-terminated */
-            if (call.data[0].size > 0) {
-                call.data[0].ptr[call.data[0].size - 1] = '\0';
-            }
-            be->write0(ctx, (const char *)call.data[0].ptr);
+        if (be->write0 && parsed.data_count > 0) {
+            be->write0(ctx, (const char *)parsed.data[0].ptr);
         }
-        write_retn(state, riff_addr, 0, 0, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, 0, 0, NULL, 0);
         break;
 
     case SH_SYS_READC:
         result = be->readc ? be->readc(ctx) : -1;
-        write_retn(state, riff_addr, result, 0, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, result, 0, NULL, 0);
         break;
 
     /* System operations */
 
     case SH_SYS_ISERROR:
-        if (call.parm_count >= 1) {
-            result = (call.parms[0] < 0) ? 1 : 0;
+        if (parsed.parm_count >= 1) {
+            result = (parsed.parms[0] < 0) ? 1 : 0;
         }
-        write_retn(state, riff_addr, result, 0, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, result, 0, NULL, 0);
         break;
 
     case SH_SYS_CLOCK:
         result = be->clock ? be->clock(ctx) : -1;
-        write_retn(state, riff_addr, result, 0, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, result, 0, NULL, 0);
         break;
 
     case SH_SYS_TIME:
         result = be->time ? be->time(ctx) : -1;
-        write_retn(state, riff_addr, result, 0, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, result, 0, NULL, 0);
         break;
 
     case SH_SYS_TICKFREQ:
         result = be->tickfreq ? be->tickfreq(ctx) : -1;
-        write_retn(state, riff_addr, result, 0, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, result, 0, NULL, 0);
         break;
 
     case SH_SYS_ERRNO:
         result = be->get_errno ? be->get_errno(ctx) : 0;
-        write_retn(state, riff_addr, result, 0, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, result, 0, NULL, 0);
         break;
 
     case SH_SYS_SYSTEM:
-        if (be->do_system && call.data_count > 0) {
-            result = be->do_system(ctx, (const char *)call.data[0].ptr,
-                                   call.data[0].size);
+        if (be->do_system && parsed.data_count > 0) {
+            result = be->do_system(ctx, (const char *)parsed.data[0].ptr,
+                                   parsed.data[0].size);
         } else {
             result = -1;
         }
-        write_retn(state, riff_addr, result, 0, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, result, 0, NULL, 0);
         break;
 
     case SH_SYS_GET_CMDLINE:
         /* Not commonly used, return empty */
-        write_retn(state, riff_addr, -1, ENOSYS, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, -1, ENOSYS, NULL, 0);
         break;
 
     case SH_SYS_HEAPINFO:
-        if (be->heapinfo) {
-            unsigned int heap_base, heap_limit, stack_base, stack_limit;
-            result = be->heapinfo(ctx, &heap_base, &heap_limit,
-                                  &stack_base, &stack_limit);
-            /* TODO: Write 4 PARM chunks with pointer values */
-        }
-        write_retn(state, riff_addr, -1, ENOSYS, NULL, 0);
+        /* Heap info retrieval not yet fully implemented */
+        write_retn_payload(state, riff_addr, &parsed, -1, ENOSYS, NULL, 0);
         break;
 
     case SH_SYS_EXIT:
     case SH_SYS_EXIT_EXTENDED:
-        if (be->do_exit && call.parm_count >= 1) {
-            unsigned int subcode = (call.parm_count >= 2) ?
-                                   (unsigned int)call.parms[1] : 0;
-            be->do_exit(ctx, (unsigned int)call.parms[0], subcode);
+        if (be->do_exit && parsed.parm_count >= 1) {
+            unsigned int subcode = (parsed.parm_count >= 2) ?
+                                   (unsigned int)parsed.parms[1] : 0;
+            be->do_exit(ctx, (unsigned int)parsed.parms[0], subcode);
         }
-        write_retn(state, riff_addr, 0, 0, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, 0, 0, NULL, 0);
         break;
 
     case SH_SYS_ELAPSED:
@@ -560,15 +570,16 @@ int zbc_host_process(zbc_host_state_t *state, uint64_t riff_addr)
                 uint8_t tick_data[8];
                 ZBC_WRITE_U32_LE(tick_data, lo);
                 ZBC_WRITE_U32_LE(tick_data + 4, hi);
-                write_retn(state, riff_addr, 0, 0, tick_data, 8);
+                write_retn_payload(state, riff_addr, &parsed, 0, 0, tick_data, 8);
                 break;
             }
         }
-        write_retn(state, riff_addr, -1, ENOSYS, NULL, 0);
+        write_retn_payload(state, riff_addr, &parsed, -1, ENOSYS, NULL, 0);
         break;
 
     default:
-        write_erro(state, riff_addr, ZBC_PROTO_ERR_UNSUPPORTED_OP);
+        ZBC_LOG_WARN("unknown opcode 0x%02x", (unsigned)parsed.opcode);
+        write_erro_payload(state, riff_addr, &parsed, ZBC_PROTO_ERR_UNSUPPORTED_OP);
         break;
     }
 
