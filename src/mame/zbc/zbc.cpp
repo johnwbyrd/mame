@@ -14,8 +14,8 @@
     Design Philosophy:
     This module uses C++ templates to eliminate code duplication across
     CPU architectures. A single template class (zbc_state) is instantiated
-    for each CPU type, with compile-time customization of load address,
-    clock speed, and video RAM placement.
+    for each CPU type, with compile-time customization of clock speed
+    and video RAM placement.
 
     The DEFINE_ZBC macro generates complete machine variants from a single
     line, creating unique classes and registering them with MAME.
@@ -90,12 +90,11 @@ using zbc_speed_t = uint64_t; // CPU speeds (64-bit for future GHz ranges)
 
 // Template parameters:
 //   CPU_TYPE:   CPU device class (e.g., m6502_device, z80_device)
-//   LOAD_ADDR:  Quickload program load address (default 0 = auto-calculate)
 //   CPU_SPEED:  CPU clock frequency in Hz (default 10 MHz)
 //   VRAM_ADDR:  Video RAM base (default 0 = auto-calculate near top of address
 //   space)
-template <typename CPU_TYPE, zbc_addr_t LOAD_ADDR = 0,
-          zbc_speed_t CPU_SPEED = 10'000'000, zbc_addr_t VRAM_ADDR = 0>
+template <typename CPU_TYPE, zbc_speed_t CPU_SPEED = 10'000'000,
+          zbc_addr_t VRAM_ADDR = 0>
 class zbc_state : public driver_device {
   public:
 	zbc_state(const machine_config &mconfig, device_type type, const char *tag)
@@ -154,19 +153,6 @@ class zbc_state : public driver_device {
 		return reserved_start - VRAM_SIZE;
 	}
 
-	// Calculate load address - placed proportionally in address space.
-	// For n-bit space, load at 2^(1 + n/2):
-	//   16-bit (64KB):  0x200     24-bit (16MB):  0x2000      32-bit (4GB):
-	//   0x20000
-	// MUST be called only when address space exists (machine_start(), not
-	// mem_map()).
-	zbc_addr_t get_load_addr() const {
-		if (LOAD_ADDR != 0)
-			return LOAD_ADDR;
-		int addr_bits = m_maincpu->space(AS_PROGRAM).addr_width();
-		return (1ULL << (1 + addr_bits / 2));
-	}
-
 	// Calculate semihost device address - placed just before VRAM.
 	// Device registers are 32 bytes, placed immediately before video RAM.
 	// MUST be called only when address space exists (machine_start(), not
@@ -202,9 +188,8 @@ class zbc_state : public driver_device {
 	}
 };
 
-template <typename CPU_TYPE, zbc_addr_t LOAD_ADDR, zbc_speed_t CPU_SPEED,
-          zbc_addr_t VRAM_ADDR>
-void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::mem_map(
+template <typename CPU_TYPE, zbc_speed_t CPU_SPEED, zbc_addr_t VRAM_ADDR>
+void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::mem_map(
     address_map &map) {
 	map.unmap_value_high(); // Unmapped reads return 0xFF (floating bus
 	                        // behavior)
@@ -252,18 +237,16 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::mem_map(
 	// specific backing storage
 }
 
-template <typename CPU_TYPE, zbc_addr_t LOAD_ADDR, zbc_speed_t CPU_SPEED,
-          zbc_addr_t VRAM_ADDR>
-uint8_t zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::vdg_videoram_r(
+template <typename CPU_TYPE, zbc_speed_t CPU_SPEED, zbc_addr_t VRAM_ADDR>
+uint8_t zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::vdg_videoram_r(
     offs_t offset) {
 	// MC6847 VDG reads character codes from video RAM for display.
 	// Called ~15,000 times/second as VDG scans the 32x16 character grid.
 	return m_videoram[offset & VRAM_MASK]; // Mask to 512-byte range
 }
 
-template <typename CPU_TYPE, zbc_addr_t LOAD_ADDR, zbc_speed_t CPU_SPEED,
-          zbc_addr_t VRAM_ADDR>
-void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::vdg_fsync(
+template <typename CPU_TYPE, zbc_speed_t CPU_SPEED, zbc_addr_t VRAM_ADDR>
+void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::vdg_fsync(
     int state) {
 	// MC6847 field sync callback - fires at ~60Hz (PAL: ~62Hz)
 	// Only trigger interrupt on rising edge (0 -> 1 transition) if enabled
@@ -274,9 +257,8 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::vdg_fsync(
 	m_maincpu->set_input_line(m_interrupt_line, ASSERT_LINE);
 }
 
-template <typename CPU_TYPE, zbc_addr_t LOAD_ADDR, zbc_speed_t CPU_SPEED,
-          zbc_addr_t VRAM_ADDR>
-void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
+template <typename CPU_TYPE, zbc_speed_t CPU_SPEED, zbc_addr_t VRAM_ADDR>
+void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::init_screen() {
 	m_console.clear_screen();
 
 	m_console.center_line("Zero board computer");
@@ -288,17 +270,9 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
 	char addr_buf[64];
 	zbc_addr_t semihost_addr = get_semihost_addr();
 	zbc_addr_t vram_addr = get_vram_addr();
-	zbc_addr_t load_addr = get_load_addr();
-	// Calculate total RAM available for programs (everything before semihost
-	// device)
-	zbc_size_t available_ram = semihost_addr - load_addr;
 
-	snprintf(addr_buf, sizeof(addr_buf), "Load address: 0x%llX",
-	         (unsigned long long)load_addr);
-	m_console.center_line(addr_buf);
-
-	snprintf(addr_buf, sizeof(addr_buf), "Available RAM: %llu bytes",
-	         (unsigned long long)available_ram);
+	snprintf(addr_buf, sizeof(addr_buf), "RAM: 0x0 - 0x%llX",
+	         (unsigned long long)(semihost_addr - 1));
 	m_console.center_line(addr_buf);
 
 	snprintf(addr_buf, sizeof(addr_buf), "Semihost: 0x%llX-0x%llX",
@@ -314,7 +288,7 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
 	m_console.center_line("");
 
 	// Display welcome message with RAM size
-	std::string ram_size_str = format_ram_size(available_ram);
+	std::string ram_size_str = format_ram_size(semihost_addr);
 	std::string intro = "This system has " + ram_size_str +
 	                    " of RAM and a MC6847 video display. "
 	                    "Load and execute an ELF executable in MAME "
@@ -323,9 +297,8 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
 	m_console.print_sentence(intro.c_str());
 }
 
-template <typename CPU_TYPE, zbc_addr_t LOAD_ADDR, zbc_speed_t CPU_SPEED,
-          zbc_addr_t VRAM_ADDR>
-void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_start() {
+template <typename CPU_TYPE, zbc_speed_t CPU_SPEED, zbc_addr_t VRAM_ADDR>
+void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::machine_start() {
 	// RUNTIME MEMORY INSTALLATION:
 	// NOW devices have started and address spaces exist. We can query CPU
 	// properties and install memory dynamically based on the actual hardware
@@ -431,9 +404,8 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_start() {
 	m_console.set_vram_base(m_videoram.target());
 }
 
-template <typename CPU_TYPE, zbc_addr_t LOAD_ADDR, zbc_speed_t CPU_SPEED,
-          zbc_addr_t VRAM_ADDR>
-void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_reset() {
+template <typename CPU_TYPE, zbc_speed_t CPU_SPEED, zbc_addr_t VRAM_ADDR>
+void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::machine_reset() {
 	init_screen();
 
 	// Configure VSync interrupt based on JP1 jumper setting
@@ -456,10 +428,9 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_reset() {
 	}
 }
 
-template <typename CPU_TYPE, zbc_addr_t LOAD_ADDR, zbc_speed_t CPU_SPEED,
-          zbc_addr_t VRAM_ADDR>
+template <typename CPU_TYPE, zbc_speed_t CPU_SPEED, zbc_addr_t VRAM_ADDR>
 template <typename DEVICE_TYPE>
-void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::zbc(
+void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::zbc(
     machine_config &config, DEVICE_TYPE const &cpu_type) {
 	cpu_type(config, m_maincpu, CPU_SPEED);
 	m_maincpu->set_addrmap(AS_PROGRAM, &zbc_state::mem_map);
@@ -508,11 +479,8 @@ static INPUT_PORTS_START(zbc) PORT_START("CONFIG")
 //   cpu_type: MAME device type macro for machine_config (e.g., M6502)
 //   short_name: Machine name suffix, creates "zbc<short_name>" (e.g., 6502 →
 //   zbc6502) display_name: Human-readable name for UI (e.g., "MOS 6502")
-//   ...: Optional template parameter overrides (load_addr, cpu_speed,
-//   vram_addr)
-//        Example: DEFINE_ZBC(..., ..., ..., ..., 0x1000, 8000000) overrides
-//        LOAD_ADDR=0x1000, CPU_SPEED=8MHz (if LOAD_ADDR not specified, defaults
-//        to 0 = auto-calculate based on address space width)
+//   ...: Optional template parameter overrides (cpu_speed, vram_addr)
+//        Example: DEFINE_ZBC(..., ..., ..., ..., 8000000) overrides CPU_SPEED=8MHz
 #define DEFINE_ZBC(cpu_class, cpu_type, short_name, display_name, ...)         \
 	namespace {                                                                \
 	class zbc_##short_name##_state                                             \

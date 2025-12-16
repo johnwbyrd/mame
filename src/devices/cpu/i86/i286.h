@@ -6,8 +6,10 @@
 #pragma once
 
 #include "i86.h"
-// Use value above generic INPUT_LINE_IRQn (0-9) to avoid collision.
-// See i386.h for detailed explanation.
+/*
+ * A20 gate input line - must not collide with generic INPUT_LINE_IRQn.
+ * See src/devices/cpu/i386/i386.h for detailed explanation.
+ */
 #define INPUT_LINE_A20      32
 
 DECLARE_DEVICE_TYPE(I80286, i80286_cpu_device)

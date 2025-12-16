@@ -10,9 +10,19 @@
 #include "softfloat3/source/include/softfloat.h"
 #include <algorithm>
 
-// Use values above generic INPUT_LINE_IRQn (0-9) to avoid collision.
-// ZBC and other boards that wire IRQs directly to CPU input lines
-// would otherwise conflict with these x86-specific control lines.
+/*
+ * x86-specific input lines for A20 gate and System Management Interrupt.
+ *
+ * These must NOT collide with generic INPUT_LINE_IRQn values (0-9) defined
+ * in src/emu/diexec.h. PC-compatible machines route IRQs through a PIC (8259)
+ * which aggregates them before presenting to the CPU, so they never set
+ * INPUT_LINE_IRQ1..IRQ9 directly on x86 CPUs. However, CPU-agnostic boards
+ * like ZBC wire IRQs directly to CPU input lines, which would collide with
+ * A20/SMI if these used low values.
+ *
+ * Historical note: These were originally defined as 1 and 2, which collided
+ * with INPUT_LINE_IRQ1/IRQ2. Changed to 32/33 to avoid collision.
+ */
 #define INPUT_LINE_A20      32
 #define INPUT_LINE_SMI      33
 

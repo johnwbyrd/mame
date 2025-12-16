@@ -13,7 +13,7 @@ Zero Board Computer (ZBC)
 The ZBC (Zero Board Computer) system provides minimal, standardized test
 environments for all emulatable CPU architectures in MAME. Each ZBC variant
 consists of a CPU, RAM, text display, and semihosting interface, allowing
-programs to be loaded and executed via quickload with host I/O support.
+programs to be loaded and executed via ELF loader with host I/O support.
 
 The zbcgen tool automates the discovery, generation, and maintenance of ZBC
 definitions, serving as the canonical, comprehensive list of CPU support in
@@ -36,9 +36,9 @@ The zbcgen system automates:
 
 The ZBC system uses C++ templates to eliminate code duplication. A single
 template class (``zbc_state``) is instantiated for each CPU type, with
-compile-time customization of load address, clock speed, and video RAM
-placement. CPU-specific initialization (reset vectors, exception tables)
-is handled via template specialization.
+compile-time customization of clock speed and video RAM placement.
+CPU-specific initialization (reset vectors, exception tables) is handled
+via template specialization.
 
 The ``DEFINE_ZBC`` macro generates complete machine variants from a single
 line, creating unique classes and registering them with MAME.
@@ -76,7 +76,7 @@ Each ZBC system includes:
 * **RAM**: Sized automatically based on CPU address space width
 * **MC6847 VDG**: Text display (32x16 characters) at top of address space
 * **Semihosting**: Memory-mapped semihost device (32-byte register interface)
-* **Quickload**: Support for loading headerless binary programs
+* **ELF Loader**: Support for loading static ELF executables (``-elfload``)
 * **CPU Init**: Architecture-specific boot code (reset vectors, etc.)
 * **JP1 Jumper**: Configurable VSync interrupt routing (see 2.3)
 
@@ -200,9 +200,9 @@ This scales the reserved region proportionally with address space:
 
 **Available RAM**::
 
-    ram_start = LOAD_ADDR (default 0x0200)
+    ram_start = 0x0000
     ram_end = semihost_addr - 1
-    available_ram = semihost_addr - LOAD_ADDR
+    available_ram = semihost_addr
 
 **Example: 16-bit CPU (Z80, 6502, etc.)**::
 
@@ -211,13 +211,10 @@ This scales the reserved region proportionally with address space:
     reserved_start = 0xFF00
     vram_addr      = 0xFF00 - 512    = 0xFE00
     semihost_addr  = 0xFE00 - 32     = 0xFDE0
-    ram_start      = 0x0200
-    ram_end        = 0xFDDF
-    available_ram  = 0xFDE0 - 0x0200 = 64,480 bytes
+    available_ram  = 0xFDE0           = 64,992 bytes
 
     Memory Map:
-    0x0000-0x01FF   Low memory (zero page, vectors, stack)
-    0x0200-0xFDDF   Available RAM (64,480 bytes)
+    0x0000-0xFDDF   Available RAM (64,992 bytes)
     0xFDE0-0xFDFF   Semihost device (32 bytes)
     0xFE00-0xFEFF   Video RAM (512 bytes)
     0xFF00-0xFFFF   Reserved region (256 bytes)
@@ -227,17 +224,14 @@ This scales the reserved region proportionally with address space:
     Address Space: 32-bit (4GB total)
 
     reserved_start = 0xFFFF0000
-    vram_addr      = 0xFFFF0000 - 512  = 0xFFFFFE00
-    semihost_addr  = 0xFFFFFE00 - 32   = 0xFFFFFDE0
-    ram_start      = 0x00000200
-    ram_end        = 0xFFFFFDDF
-    available_ram  = 0xFFFFFDE0 - 0x200 = 4,294,966,752 bytes (~4GB)
+    vram_addr      = 0xFFFF0000 - 512  = 0xFFFEFE00
+    semihost_addr  = 0xFFFEFE00 - 32   = 0xFFFEFDE0
+    available_ram  = 0xFFFEFDE0         = 4,294,705,632 bytes (~4GB)
 
     Memory Map:
-    0x00000000-0x000001FF   Low memory (vectors, boot code)
-    0x00000200-0xFFFFFDDF   Available RAM (~4GB)
-    0xFFFFFDE0-0xFFFFFDFF   Semihost device (32 bytes)
-    0xFFFFFE00-0xFFFFFFFF   Video RAM (512 bytes)
+    0x00000000-0xFFFEFDDF   Available RAM (~4GB)
+    0xFFFEFDE0-0xFFFEFDFF   Semihost device (32 bytes)
+    0xFFFEFE00-0xFFFEFFFF   Video RAM (512 bytes)
     0xFFFF0000-0xFFFFFFFF   Reserved region (65,536 bytes)
 
 The layout scales automatically across all address space sizes, ensuring
@@ -261,12 +255,12 @@ Parameters:
   * ``cpu_type``: MAME device type macro for machine_config (e.g., ``M6502``)
   * ``short_name``: Machine name suffix, creates ``zbc<short_name>`` (e.g., ``m6502`` → ``zbcm6502``)
   * ``display_name``: Human-readable name for UI (e.g., ``"MOS Technology 6502"``)
-  * ``...``: Optional template parameter overrides (load_addr, cpu_speed, vram_addr)
+  * ``...``: Optional template parameter overrides (cpu_speed, vram_addr)
 
 Optional parameters allow customization::
 
-    DEFINE_ZBC(pdp1_device, PDP1, pdp1_cpu, "DEC PDP-1 Central Processor", 0x0010, 200000)
-    // Sets LOAD_ADDR=0x0010, CPU_SPEED=200kHz
+    DEFINE_ZBC(pdp1_device, PDP1, pdp1_cpu, "DEC PDP-1 Central Processor", 200000)
+    // Sets CPU_SPEED=200kHz
 
 
 3. Knowledge Base (zbc_status.csv)
@@ -497,65 +491,10 @@ The zbcgen system could enable automated CPU testing in CI pipelines:
 
 This would ensure the ZBC driver list stays current as MAME evolves.
 
-
-6. CPU-Specific Initialization
--------------------------------
-
-6.1 Template Specialization
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Some CPUs require specific boot code to enter an idle loop. The ``init_cpu_for_idle``
-function uses template specialization::
-
-    template <typename CPU_TYPE, uint32_t LOAD_ADDR>
-    void init_cpu_for_idle(address_space &space) {
-        // Default: no initialization
-    }
-
-    // 6502 specialization
-    template <>
-    void init_cpu_for_idle<m6502_device, 0x0200>(address_space &space) {
-        // Set reset vector to 0x0200
-        space.write_byte(0xfffc, 0x00);
-        space.write_byte(0xfffd, 0x02);
-
-        // Idle loop at 0x0200: JMP $0200
-        space.write_byte(0x0200, 0x4c);  // JMP absolute
-        space.write_byte(0x0201, 0x00);
-        space.write_byte(0x0202, 0x02);
-    }
-
-Current specializations:
-  * **MOS 6502 family**: Reset vector at 0xFFFC, idle loop at load address
-  * **Zilog Z80 family**: Boot at 0x0000 with JP to load address, NMI handler at 0x0066
-  * **Motorola 68000 family**: Vector table at 0x0000 (initial SP and PC)
-
-6.2 Adding New Specializations
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-To add CPU-specific initialization:
-
-1. Identify CPU requirements (reset vector address, boot sequence, exception handlers)
-2. Add template specialization in ``zbc.cpp``::
-
-    template <>
-    void init_cpu_for_idle<my_cpu_device, 0x0200>(address_space &space) {
-        // Set up reset vector
-        // Write idle loop at load address
-        // Configure any required exception handlers
-    }
-
-3. Rebuild and test with ``mame zbcmycpu -quik test.bin``
-
-CPUs without specializations boot with uninitialized memory. They may require
-boot code loaded via quickload, or may not execute at all. Check the MC6847
-display for system information including memory addresses.
-
-
-7. Semihosting Integration
+6. Semihosting Integration
 ---------------------------
 
-7.1 RIFF-Based Semihosting
+6.1 RIFF-Based Semihosting
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The ZBC system includes built-in semihosting support via a memory-mapped device.
@@ -564,9 +503,9 @@ just before video RAM (calculated dynamically based on address space size).
 
 Semihosting is always available - no plugins or command-line options required::
 
-    mame zbcm6502 -quik program.bin
+    mame zbcm6502 -elfload program.elf
 
-7.2 Semihost Device Register Map
+6.2 Semihost Device Register Map
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The semihost device occupies 32 bytes of address space::
@@ -583,7 +522,7 @@ The semihost device occupies 32 bytes of address space::
 
 For a 16-bit CPU, the device is at 0xFDE0-0xFDFF.
 
-7.3 Request Flow
+6.3 Request Flow
 ~~~~~~~~~~~~~~~~
 
 1. Guest allocates RIFF buffer anywhere in RAM
@@ -601,7 +540,7 @@ Programs can use semihosting calls to:
 * Get system time and clock information
 * Exit cleanly
 
-7.4 Interrupt Support
+6.4 Interrupt Support
 ~~~~~~~~~~~~~~~~~~~~~
 
 The semihost device can optionally generate an IRQ when a request completes.
@@ -612,75 +551,39 @@ Semihost completion uses IRQ1, separate from the VSync interrupt (IRQ0/NMI
 controlled by JP1 jumper). This allows programs to use either or both
 interrupt sources independently.
 
-7.5 Example Semihosting Usage
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-6502 assembly example (write "Hello" to console)::
-
-    ; Semihost device at 0xFDE0 (16-bit CPU)
-    SEMIHOST    = $FDE0
-    RIFF_BUF    = $0300      ; RIFF buffer in RAM
-
-    ; Build RIFF request at RIFF_BUF
-    ; ... (set up CNFG and CALL chunks with SYS_WRITE0)
-
-    ; Write buffer address to RIFF_PTR (16-bit, little-endian)
-    LDA #<RIFF_BUF
-    STA SEMIHOST+$08
-    LDA #>RIFF_BUF
-    STA SEMIHOST+$09
-    LDA #0
-    STA SEMIHOST+$0A    ; Clear upper bytes
-    ; ... (clear bytes 0x0B-0x17)
-
-    ; Trigger semihosting
-    STA SEMIHOST+$18    ; Write to DOORBELL
-
-    ; Poll for completion
-wait:
-    LDA SEMIHOST+$1C    ; Read STATUS
-    AND #$01            ; Check response ready bit
-    BEQ wait
-
-    ; Response is now in RIFF_BUF
-
-See the ZBC semihosting protocol specification for complete details.
-
-
-8. Usage Examples
+7. Usage Examples
 -----------------
 
-8.1 Running a ZBC System
+7.1 Running a ZBC System
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 ::
 
     # Run 6502 ZBC system (semihosting always available)
-    mame zbcm6502 -quik program.bin
+    mame zbcm6502 -elfload program.elf
 
     # Run Z80 ZBC system
-    mame zbcz80 -quik program.bin
+    mame zbcz80 -elfload program.elf
 
     # Run 68000 ZBC system
-    mame zbcm68000 -quik program.bin
+    mame zbcm68000 -elfload program.elf
 
-The program will be loaded at the configured address (default 0x0200) and
-executed. The MC6847 display shows system information on boot, including:
+The ELF file is loaded at the addresses specified in its program headers and
+execution begins at the ELF entry point. The MC6847 display shows system
+information on boot, including:
   * CPU name
-  * Load address
-  * Available RAM size
+  * RAM range (0x0 to semihost device)
   * Semihost device address range
   * Video RAM address range
 
-8.2 Writing Test Programs
+7.2 Writing Test Programs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Example 6502 program using llvm-mos toolchain (displays 'A' on screen)::
 
     // test.c - Display 'A' on screen using llvm-mos
     // Video RAM at 0xFE00 (16-bit address space)
-    // Compile: clang -O2 -target mos --config mos-sim -o test.elf test.c
-    // Extract: llvm-objcopy -O binary test.elf test.bin
+    // Compile with custom linker script for ZBC memory layout
 
     volatile char *videoram = (volatile char *)0xFE00;
 
@@ -698,16 +601,15 @@ Example 6502 program using llvm-mos toolchain (displays 'A' on screen)::
 
 Build and run::
 
-    # Install llvm-mos SDK (https://github.com/llvm-mos/llvm-mos-sdk)
-    clang -O2 -target mos --config mos-sim -o test.elf test.c
-    llvm-objcopy -O binary --only-section=.text test.elf test.bin
-    mame zbcm6502 -quik test.bin
+    # Use custom linker script for ZBC memory layout
+    # See examples/mame/ in the semihost repository for complete examples
+    mame zbcm6502 -elfload test.elf
 
 **Important**: Video RAM address varies by CPU address space size. Check the
-boot screen or calculate using formulas in section 2.3. For 16-bit CPUs,
-VRAM is at 0xFE00. For 32-bit CPUs, VRAM is at 0xFFFFFE00.
+boot screen or calculate using formulas in section 2.4. For 16-bit CPUs,
+VRAM is at 0xFE00. For 32-bit CPUs, VRAM is at 0xFFFEFE00.
 
-8.3 Automated Testing
+7.3 Automated Testing
 ~~~~~~~~~~~~~~~~~~~~~
 
 The ZBC system enables automated CPU testing::
@@ -715,13 +617,13 @@ The ZBC system enables automated CPU testing::
     # Test all working ZBC drivers
     for driver in $(grep '^zbc' src/mame/mame.lst | grep -A999 '@source:zbc/zbc.cpp' | grep '^zbc'); do
         echo "Testing $driver..."
-        timeout 5 ./mame $driver -quik test.bin -seconds_to_run 2
+        timeout 5 ./mame $driver -elfload test.elf -seconds_to_run 2
     done
 
 This validates that each CPU boots, loads programs, and executes correctly.
 
 
-9. Known Limitations
+8. Known Limitations
 --------------------
 
 CPUs excluded from ZBC coverage:
@@ -739,8 +641,8 @@ CPUs excluded from ZBC coverage:
 * **Driver name limits** - CPUs whose driver names exceed MAME's 16-character limit
 
 
-10. Future Enhancements
------------------------
+9. Future Enhancements
+----------------------
 
 Planned improvements:
 
