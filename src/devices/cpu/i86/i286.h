@@ -6,7 +6,9 @@
 #pragma once
 
 #include "i86.h"
-#define INPUT_LINE_A20      1
+// Use value above generic INPUT_LINE_IRQn (0-9) to avoid collision.
+// See i386.h for detailed explanation.
+#define INPUT_LINE_A20      32
 
 DECLARE_DEVICE_TYPE(I80286, i80286_cpu_device)
 

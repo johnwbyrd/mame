@@ -10,8 +10,11 @@
 #include "softfloat3/source/include/softfloat.h"
 #include <algorithm>
 
-#define INPUT_LINE_A20      1
-#define INPUT_LINE_SMI      2
+// Use values above generic INPUT_LINE_IRQn (0-9) to avoid collision.
+// ZBC and other boards that wire IRQs directly to CPU input lines
+// would otherwise conflict with these x86-specific control lines.
+#define INPUT_LINE_A20      32
+#define INPUT_LINE_SMI      33
 
 
 // mingw has this defined for 32-bit compiles

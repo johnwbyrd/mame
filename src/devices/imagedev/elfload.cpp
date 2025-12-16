@@ -174,6 +174,11 @@ elfload_image_device::load_elf(snapshot_image_device &img)
 	if (elf_data != ELFDATA2LSB && elf_data != ELFDATA2MSB)
 		return std::make_pair(image_error::INVALIDIMAGE, "Unknown ELF endianness");
 
+	// Reset CPU FIRST - initialize memory before loading segments
+	osd_printf_verbose("ELF: Resetting CPU '%s' before loading segments\n", m_cpu->tag());
+	m_cpu->reset();
+	osd_printf_verbose("ELF: CPU reset complete, now loading segments\n");
+
 	bool success;
 
 	if (elf_class == ELFCLASS32)
@@ -184,8 +189,7 @@ elfload_image_device::load_elf(snapshot_image_device &img)
 	if (!success)
 		return std::make_pair(image_error::INVALIDIMAGE, "Failed to parse ELF");
 
-	// Reset CPU - it will start executing from its reset vector
-	m_cpu->reset();
+	osd_printf_verbose("ELF: All segments loaded\n");
 
 	return std::make_pair(std::error_condition(), std::string());
 }
@@ -327,13 +331,71 @@ void elfload_image_device::load_segment(uint64_t vaddr, const uint8_t *data,
 {
 	address_space &space = m_cpu->space(AS_PROGRAM);
 
-	// Copy file data
-	for (size_t i = 0; i < filesz; i++)
-		space.write_byte(vaddr + i, data[i]);
+	osd_printf_verbose("ELF: Loading segment at 0x%08x, filesz=0x%x, memsz=0x%x\n",
+		(uint32_t)vaddr, (uint32_t)filesz, (uint32_t)memsz);
+	osd_printf_verbose("ELF: Address space: %d-bit, mask=0x%llx\n",
+		space.addr_width(), (unsigned long long)space.addrmask());
 
-	// Zero-fill BSS (memsz > filesz)
-	for (size_t i = filesz; i < memsz; i++)
-		space.write_byte(vaddr + i, 0);
+	// Show first 16 bytes of data
+	osd_printf_verbose("ELF: First bytes to write:");
+	for (size_t i = 0; i < std::min(filesz, size_t(16)); i++)
+		osd_printf_verbose(" %02x", data[i]);
+	osd_printf_verbose("\n");
+
+	// Try to get direct memory pointer for faster writes
+	uint8_t *write_ptr = reinterpret_cast<uint8_t*>(space.get_write_ptr(vaddr));
+	uint8_t *read_ptr = reinterpret_cast<uint8_t*>(space.get_read_ptr(vaddr));
+
+	// Debug: Show pointer info for high addresses (reset vector area)
+	if (vaddr >= 0x80000000) {
+		osd_printf_info("ELF DEBUG: High address segment 0x%08x\n", (uint32_t)vaddr);
+		osd_printf_info("ELF DEBUG:   write_ptr=%p read_ptr=%p\n",
+			(void*)write_ptr, (void*)read_ptr);
+		osd_printf_info("ELF DEBUG:   Handler info: %s\n",
+			space.get_handler_string(read_or_write::READ, vaddr).c_str());
+	}
+
+	if (write_ptr && filesz > 0)
+	{
+		osd_printf_verbose("ELF: Using direct memory write to %p\n", (void*)write_ptr);
+		memcpy(write_ptr, data, filesz);
+		// Zero-fill BSS
+		if (memsz > filesz)
+			memset(write_ptr + filesz, 0, memsz - filesz);
+	}
+	else
+	{
+		osd_printf_verbose("ELF: Using byte-by-byte write (no direct pointer)\n");
+		// Copy file data
+		for (size_t i = 0; i < filesz; i++)
+			space.write_byte(vaddr + i, data[i]);
+		// Zero-fill BSS
+		for (size_t i = filesz; i < memsz; i++)
+			space.write_byte(vaddr + i, 0);
+	}
+
+	// Verify by reading back
+	osd_printf_verbose("ELF: Verifying first bytes:");
+	for (size_t i = 0; i < std::min(filesz, size_t(16)); i++)
+		osd_printf_verbose(" %02x", space.read_byte(vaddr + i));
+	osd_printf_verbose("\n");
+
+	// Debug: For high addresses, also verify read pointer gives same data
+	if (vaddr >= 0x80000000 && read_ptr && filesz > 0) {
+		osd_printf_info("ELF DEBUG: Direct read_ptr bytes:");
+		for (size_t i = 0; i < std::min(filesz, size_t(16)); i++)
+			osd_printf_info(" %02x", read_ptr[i]);
+		osd_printf_info("\n");
+
+		// Check if write_ptr and read_ptr point to same memory
+		if (write_ptr && read_ptr) {
+			osd_printf_info("ELF DEBUG: write_ptr==read_ptr: %s (diff=%ld)\n",
+				(write_ptr == read_ptr) ? "YES" : "NO",
+				(long)(read_ptr - write_ptr));
+		}
+	}
+
+	osd_printf_verbose("ELF: Segment loaded successfully\n");
 }
 
 void elfload_image_device::report_elf_type_error(uint16_t e_type)
