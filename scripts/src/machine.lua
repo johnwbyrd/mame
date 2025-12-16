@@ -75,6 +75,8 @@ files {
 	MAME_DIR .. "src/devices/imagedev/simh_tape_image.h",
 	MAME_DIR .. "src/devices/imagedev/snapquik.cpp",
 	MAME_DIR .. "src/devices/imagedev/snapquik.h",
+	MAME_DIR .. "src/devices/imagedev/elfload.cpp",
+	MAME_DIR .. "src/devices/imagedev/elfload.h",
 	MAME_DIR .. "src/devices/imagedev/wafadrive.cpp",
 	MAME_DIR .. "src/devices/imagedev/wafadrive.h",
 	MAME_DIR .. "src/devices/imagedev/avivideo.cpp",

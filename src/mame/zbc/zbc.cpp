@@ -8,7 +8,8 @@
     Each ZBC includes:
     - RAM (size determined by CPU address width)
     - MC6847 VDG text display (32x16)
-    - Quickload support for loading programs
+    - Semihosting device for file I/O, console, and time services
+    - ELF loader for loading programs
 
     Design Philosophy:
     This module uses C++ templates to eliminate code duplication across
@@ -20,18 +21,19 @@
     line, creating unique classes and registering them with MAME.
 
     Limitations:
-    - No ROM (program must be loaded via -quik)
+    - No ROM (program must be loaded via -elfload)
     - No I/O ports (memory-mapped video only)
     - Video RAM is fixed at calculated address (may conflict with some programs)
 
     Usage:
-    mame zbc6502 -quik program.bin
-    mame zbcz80 -quik program.bin
-    mame zbc68000 -quik program.bin
+    mame zbcm6502 -elfload program.elf
+    mame zbcz80 -elfload program.elf
+    mame zbc68000 -elfload program.elf
     etc.
 
-    The program will be loaded at a dynamically calculated address based on
-    CPU address space width (formula: 2^(1 + addr_bits/2)) and executed.
+    The ELF loader loads PT_LOAD segments into guest memory and resets the CPU.
+    The CPU starts executing via its reset vector, which must be included in
+    the ELF file (via linker script).
 
 ***************************************************************************/
 
@@ -70,7 +72,7 @@
 // To update: python3 scripts/build/zbcgen.py --build
 #include "zbcgen.hpp"
 
-#include "imagedev/snapquik.h"
+#include "imagedev/elfload.h"
 #include "m6847drv.h"
 #include "machine/semihost.h"
 #include "video/mc6847.h"
@@ -99,7 +101,7 @@ class zbc_state : public driver_device {
 	zbc_state(const machine_config &mconfig, device_type type, const char *tag)
 	    : driver_device(mconfig, type, tag), m_maincpu(*this, "maincpu"),
 	      m_vdg(*this, "vdg"), m_semihost(*this, "semihost"),
-	      m_quickload(*this, "quickload"),
+	      m_elfload(*this, "elfload"),
 	      m_videoram(*this, "videoram", 0x200, ENDIANNESS_LITTLE) {}
 
 	template <typename DEVICE_TYPE>
@@ -114,7 +116,7 @@ class zbc_state : public driver_device {
 	required_device<cpu_device> m_maincpu;
 	required_device<mc6847_base_device> m_vdg;
 	required_device<semihost_device> m_semihost;
-	optional_device<quickload_image_device> m_quickload;
+	optional_device<elfload_image_device> m_elfload;
 
 	// Memory - byte-granular VRAM access for MC6847
 	memory_share_creator<uint8_t> m_videoram;
@@ -132,9 +134,6 @@ class zbc_state : public driver_device {
 
 	void mem_map(address_map &map) ATTR_COLD;
 	void init_screen();
-
-	DECLARE_QUICKLOAD_LOAD_MEMBER(quickload_cb);
-	bool set_pc_generically(zbc_addr_t addr);
 
 	uint8_t vdg_videoram_r(offs_t offset);
 	void vdg_fsync(int state);
@@ -318,8 +317,8 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::init_screen() {
 	std::string ram_size_str = format_ram_size(available_ram);
 	std::string intro = "This system has " + ram_size_str +
 	                    " of RAM and a MC6847 video display. "
-	                    "Load and execute a headerless binary in MAME "
-	                    "by using the -quik option. "
+	                    "Load and execute an ELF executable in MAME "
+	                    "by using the -elfload option. "
 	                    "Happy coding!";
 	m_console.print_sentence(intro.c_str());
 }
@@ -394,8 +393,8 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_start() {
 	// CRITICAL: Must use install_ram()/install_rom() to force byte-granular
 	// access on 16/32-bit CPUs. The MC6847 VDG always reads bytes, but
 	// map().ram() creates CPU-width memory which would cause access issues.
-	if (m_quickload && m_quickload->exists()) {
-		ZBC_LOG_MEM("ZBC: Installing VRAM as R/W (quickload present)\n");
+	if (m_elfload && m_elfload->exists()) {
+		ZBC_LOG_MEM("ZBC: Installing VRAM as R/W (ELF loaded)\n");
 		ZBC_LOG_MEM("  Range: 0x%llX - 0x%llX\n", (unsigned long long)vram_addr,
 		            (unsigned long long)vram_end);
 		space.install_ram(vram_addr, vram_end, m_videoram.target());
@@ -457,123 +456,6 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::machine_reset() {
 	}
 }
 
-/***************************************************************************
- * set_pc_generically - Set program counter using symbol name lookup
- *
- * BACKGROUND: MAME's set_pc() method doesn't work for all CPU types.
- *
- * The standard set_pc() calls set_state_int(STATE_GENPC, pc), which requires
- * the CPU to register STATE_GENPC with the .callimport() flag. When callimport
- * is present, writing to that state entry triggers state_import() which syncs
- * the value to the CPU's internal registers.
- *
- * PROBLEM: Approximately 50% of MAME's CPU implementations do NOT register
- * STATE_GENPC with callimport. For example, m6502.cpp line 59:
- *
- *     state_add(STATE_GENPC, "GENPC", XPC).callexport().noshow();
- *
- * Without callimport, set_pc() writes to a temporary variable (XPC) that is
- * never synced back to the actual program counter (NPC). The CPU continues
- * executing from its reset vector instead of the requested address.
- *
- * CPUs WITHOUT callimport on STATE_GENPC (broken set_pc):
- *   m6502, w65c02, r65c02, m65c02, arm7, superfx, mips3, i960, e132xs, etc.
- *
- * CPUs WITH callimport on STATE_GENPC (working set_pc):
- *   z80, m68000, sh2, sh4, g65816, m6809, cosmac, etc.
- *
- * SOLUTION: All CPUs register their native "PC" register with callimport.
- * For m6502.cpp line 62:
- *
- *     state_add(M6502_PC, "PC", NPC).callimport();
- *
- * By looking up the state entry with symbol "PC" and writing directly to it,
- * we bypass the broken STATE_GENPC mechanism and use the CPU's working
- * native PC register.
- *
- * This function iterates through state_entries(), finds the entry with
- * symbol() == "PC", and calls set_value() on it.
- *
- * HISTORY: The m6502 STATE_GENPC was changed in commit 38306e6b274 (Feb 2018)
- * from pointing to NPC (actual PC) to XPC (temp variable) to support
- * pc_to_external() translation for banked memory variants. The author added
- * callexport for reading but forgot callimport for writing.
- *
- * Returns true if PC was set, false if no writeable "PC" register was found.
- ***************************************************************************/
-template <typename CPU_TYPE, zbc_addr_t LOAD_ADDR, zbc_speed_t CPU_SPEED,
-          zbc_addr_t VRAM_ADDR>
-bool zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::set_pc_generically(
-    zbc_addr_t addr) {
-	for (auto &entry : m_maincpu->state_entries()) {
-		if (entry->symbol() && strcmp(entry->symbol(), "PC") == 0) {
-			if (entry->writeable()) {
-				entry->set_value(addr);
-				return true;
-			}
-			ZBC_ERROR("ZBC: PC register found but not writeable\n");
-			return false;
-		}
-	}
-	ZBC_ERROR("ZBC: No PC register found in CPU state entries\n");
-	return false;
-}
-
-// Quickload callback: Load binary program into memory
-// Called when user specifies -quik program.bin on command line.
-// Loads raw binary at LOAD_ADDR and prepares system for execution.
-template <typename CPU_TYPE, zbc_addr_t LOAD_ADDR, zbc_speed_t CPU_SPEED,
-          zbc_addr_t VRAM_ADDR>
-std::pair<std::error_condition, std::string>
-zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::quickload_cb(
-    snapshot_image_device &image) {
-	// Check if CPU has program address space before loading
-	if (!m_maincpu || !m_maincpu->has_space(AS_PROGRAM)) {
-		ZBC_ERROR("ZBC quickload_cb: CPU '%s' has no AS_PROGRAM space, "
-		          "cannot load program\n",
-		          m_maincpu ? m_maincpu->name() : "null");
-		return std::make_pair(image_error::UNSPECIFIED,
-		                      "CPU has no program address space");
-	}
-
-	const zbc_size_t size = image.length();
-	const zbc_addr_t semihost_addr = get_semihost_addr();
-	const zbc_addr_t load_addr = get_load_addr();
-
-	// Validate program fits between load address and semihost device
-	if (size > semihost_addr - load_addr)
-		return std::make_pair(image_error::INVALIDLENGTH, "Program too large");
-
-	// Read into temporary buffer (can't read directly to fragmented address
-	// space)
-	std::vector<uint8_t> program(size);
-	if (image.fread(&program[0], size) != size)
-		return std::make_pair(image_error::UNSPECIFIED,
-		                      "Failed to read program file");
-
-	// Write program to memory byte-by-byte (handles endianness/bus width)
-	address_space &space = m_maincpu->space(AS_PROGRAM);
-	for (zbc_addr_t i = 0; i < size; i++)
-		space.write_byte(load_addr + i, program[i]);
-
-	// Clear screen to remove boot message
-	init_screen();
-
-	// Set PC to start of loaded program
-	// Use set_pc_generically() because set_pc() doesn't work on all CPU types
-	ZBC_INFO(
-	    "ZBC quickload: loaded %llu bytes at 0x%llX, setting PC to 0x%llX\n",
-	    (unsigned long long)size, (unsigned long long)load_addr,
-	    (unsigned long long)load_addr);
-
-	if (!set_pc_generically(load_addr)) {
-		ZBC_WARNING("ZBC: set_pc_generically failed, falling back to set_pc\n");
-		m_maincpu->set_pc(load_addr);
-	}
-
-	return std::make_pair(std::error_condition(), std::string()); // Success
-}
-
 template <typename CPU_TYPE, zbc_addr_t LOAD_ADDR, zbc_speed_t CPU_SPEED,
           zbc_addr_t VRAM_ADDR>
 template <typename DEVICE_TYPE>
@@ -599,8 +481,7 @@ void zbc_state<CPU_TYPE, LOAD_ADDR, CPU_SPEED, VRAM_ADDR>::zbc(
 	// IRQ is disabled by default - guest must enable via IRQ_ENABLE register
 	m_semihost->irq_callback().set_inputline(m_maincpu, INPUT_LINE_IRQ1);
 
-	QUICKLOAD(config, "quickload", "bin")
-	    .set_load_callback(FUNC(zbc_state::quickload_cb));
+	ELFLOAD(config, "elfload").set_cpu(m_maincpu);
 }
 
 } // anonymous namespace
