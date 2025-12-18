@@ -17,7 +17,7 @@
 // Logging configuration
 #define LOG_REG (1U << 1)
 #define LOG_REQUEST (1U << 2)
-#define VERBOSE 0
+#define VERBOSE (LOG_REG | LOG_REQUEST)
 #define LOG_OUTPUT_FUNC osd_printf_verbose
 #include "logmacro.h"
 
@@ -168,10 +168,41 @@ void semihost_device::process_request() {
 		riff_addr |= u64(m_riff_ptr[i]) << shift;
 	}
 
-	LOGREQUEST("semihost: process riff_addr=0x%llx\n",
-	           (unsigned long long)riff_addr);
+	// Peek at RIFF to find opcode - scan for CALL chunk
+	// RIFF structure: RIFF(4) + size(4) + SEMI(4) + chunks...
+	// CALL chunk: CALL(4) + size(4) + opcode(1) + reserved(3) + ...
+	u8 opcode = 0xff;
+	for (int offset = 12; offset < 200; offset += 2) {
+		u8 b0 = space.read_byte(riff_addr + offset);
+		u8 b1 = space.read_byte(riff_addr + offset + 1);
+		u8 b2 = space.read_byte(riff_addr + offset + 2);
+		u8 b3 = space.read_byte(riff_addr + offset + 3);
+		if (b0 == 'C' && b1 == 'A' && b2 == 'L' && b3 == 'L') {
+			// Found CALL chunk - opcode is 8 bytes after chunk start
+			opcode = space.read_byte(riff_addr + offset + 8);
+			break;
+		}
+	}
+
+	// Dump first 64 bytes of RIFF buffer
+	LOGREQUEST("semihost: riff_addr=0x%llx opcode=0x%02x\n",
+	           (unsigned long long)riff_addr, opcode);
+	for (int row = 0; row < 4; row++) {
+		osd_printf_verbose("  %04x: ", row * 16);
+		for (int i = 0; i < 16; i++) {
+			osd_printf_verbose("%02x ", space.read_byte(riff_addr + row * 16 + i));
+		}
+		osd_printf_verbose(" ");
+		for (int i = 0; i < 16; i++) {
+			u8 c = space.read_byte(riff_addr + row * 16 + i);
+			osd_printf_verbose("%c", (c >= 0x20 && c < 0x7f) ? c : '.');
+		}
+		osd_printf_verbose("\n");
+	}
 
 	int result = zbc_host_process(m_host.get(), riff_addr);
+
+	LOGREQUEST("semihost: result=%d\n", result);
 
 	m_status |= ZBC_STATUS_RESPONSE_READY;
 	m_irq_status |= (result == 0) ? ZBC_IRQ_RESPONSE_READY : ZBC_IRQ_ERROR;

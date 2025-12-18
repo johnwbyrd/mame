@@ -230,20 +230,16 @@ bool elfload_image_device::parse_elf32(const uint8_t *data, size_t size)
 				"Rebuild with: -static -nostdlib -fno-pie\n");
 			return false;
 		}
-		if (p_type == PT_TLS)
-		{
-			osd_printf_error("ELF: Thread-local storage not supported.\n");
-			return false;
-		}
 	}
 
-	// Second pass: load PT_LOAD segments
+	// Second pass: load PT_LOAD and PT_TLS segments
+	// PT_TLS is loaded like PT_LOAD - the C runtime handles TLS initialization
 	for (uint16_t i = 0; i < e_phnum; i++)
 	{
 		const auto *phdr = reinterpret_cast<const Elf32_Phdr *>(data + e_phoff + i * e_phentsize);
 		uint32_t p_type = elf_read(phdr->p_type, big);
 
-		if (p_type != PT_LOAD)
+		if (p_type != PT_LOAD && p_type != PT_TLS)
 			continue;
 
 		uint32_t p_offset = elf_read(phdr->p_offset, big);
@@ -296,20 +292,16 @@ bool elfload_image_device::parse_elf64(const uint8_t *data, size_t size)
 				"Rebuild with: -static -nostdlib -fno-pie\n");
 			return false;
 		}
-		if (p_type == PT_TLS)
-		{
-			osd_printf_error("ELF: Thread-local storage not supported.\n");
-			return false;
-		}
 	}
 
-	// Second pass: load PT_LOAD segments
+	// Second pass: load PT_LOAD and PT_TLS segments
+	// PT_TLS is loaded like PT_LOAD - the C runtime handles TLS initialization
 	for (uint16_t i = 0; i < e_phnum; i++)
 	{
 		const auto *phdr = reinterpret_cast<const Elf64_Phdr *>(data + e_phoff + i * e_phentsize);
 		uint32_t p_type = elf_read(phdr->p_type, big);
 
-		if (p_type != PT_LOAD)
+		if (p_type != PT_LOAD && p_type != PT_TLS)
 			continue;
 
 		uint64_t p_offset = elf_read(phdr->p_offset, big);
@@ -344,16 +336,6 @@ void elfload_image_device::load_segment(uint64_t vaddr, const uint8_t *data,
 
 	// Try to get direct memory pointer for faster writes
 	uint8_t *write_ptr = reinterpret_cast<uint8_t*>(space.get_write_ptr(vaddr));
-	uint8_t *read_ptr = reinterpret_cast<uint8_t*>(space.get_read_ptr(vaddr));
-
-	// Debug: Show pointer info for high addresses (reset vector area)
-	if (vaddr >= 0x80000000) {
-		osd_printf_info("ELF DEBUG: High address segment 0x%08x\n", (uint32_t)vaddr);
-		osd_printf_info("ELF DEBUG:   write_ptr=%p read_ptr=%p\n",
-			(void*)write_ptr, (void*)read_ptr);
-		osd_printf_info("ELF DEBUG:   Handler info: %s\n",
-			space.get_handler_string(read_or_write::READ, vaddr).c_str());
-	}
 
 	if (write_ptr && filesz > 0)
 	{
@@ -370,29 +352,12 @@ void elfload_image_device::load_segment(uint64_t vaddr, const uint8_t *data,
 		for (size_t i = 0; i < filesz; i++)
 			space.write_byte(vaddr + i, data[i]);
 		// Zero-fill BSS
+		if (memsz > filesz) {
+			osd_printf_verbose("ELF: Zero-filling BSS from 0x%08x to 0x%08x (%u bytes)\n",
+				(uint32_t)(vaddr + filesz), (uint32_t)(vaddr + memsz), (uint32_t)(memsz - filesz));
+		}
 		for (size_t i = filesz; i < memsz; i++)
 			space.write_byte(vaddr + i, 0);
-	}
-
-	// Verify by reading back
-	osd_printf_verbose("ELF: Verifying first bytes:");
-	for (size_t i = 0; i < std::min(filesz, size_t(16)); i++)
-		osd_printf_verbose(" %02x", space.read_byte(vaddr + i));
-	osd_printf_verbose("\n");
-
-	// Debug: For high addresses, also verify read pointer gives same data
-	if (vaddr >= 0x80000000 && read_ptr && filesz > 0) {
-		osd_printf_info("ELF DEBUG: Direct read_ptr bytes:");
-		for (size_t i = 0; i < std::min(filesz, size_t(16)); i++)
-			osd_printf_info(" %02x", read_ptr[i]);
-		osd_printf_info("\n");
-
-		// Check if write_ptr and read_ptr point to same memory
-		if (write_ptr && read_ptr) {
-			osd_printf_info("ELF DEBUG: write_ptr==read_ptr: %s (diff=%ld)\n",
-				(write_ptr == read_ptr) ? "YES" : "NO",
-				(long)(read_ptr - write_ptr));
-		}
 	}
 
 	osd_printf_verbose("ELF: Segment loaded successfully\n");
