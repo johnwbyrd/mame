@@ -191,6 +191,9 @@ elfload_image_device::load_elf(snapshot_image_device &img)
 
 	osd_printf_verbose("ELF: All segments loaded\n");
 
+	// If debugger is enabled, halt so user can set breakpoints before execution
+	m_cpu->machine().debug_break();
+
 	return std::make_pair(std::error_condition(), std::string());
 }
 
