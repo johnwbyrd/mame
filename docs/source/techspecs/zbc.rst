@@ -145,21 +145,6 @@ Programs using timer interrupts must:
 
 3. **Acknowledge the interrupt** by writing 0 to STATUS register
 
-**Example (6502)**::
-
-    ; Timer ISR for 6502
-    irq_handler:
-        pha                     ; Save A
-        lda SEMIHOST_STATUS     ; Read STATUS (0xFDE0 + 0x19)
-        cmp #1                  ; Timer tick?
-        bne .not_timer
-        inc tick_counter        ; Handle timer
-        lda #0
-        sta SEMIHOST_STATUS     ; Acknowledge interrupt
-    .not_timer:
-        pla                     ; Restore A
-        rti                     ; Return from interrupt
-
 **Error Returns**:
 
 * **ZBC_ERR_OK (0)**: Timer configured successfully
@@ -203,15 +188,15 @@ This scales the reserved region proportionally with address space:
     Address Space: 16-bit (64KB total)
 
     reserved_start = 0xFF00
-    vram_addr      = 0xFF00 - 512    = 0xFE00
-    semihost_addr  = 0xFE00 - 32     = 0xFDE0
-    available_ram  = 0xFDE0           = 64,992 bytes
+    vram_addr      = 0xFF00 - 512    = 0xFD00
+    semihost_addr  = 0xFD00 - 32     = 0xFCE0
+    available_ram  = 0xFCE0           = 64,736 bytes
 
     Memory Map:
-    0x0000-0xFDDF   Available RAM (64,992 bytes)
-    0xFDE0-0xFDFF   Semihost device (32 bytes)
-    0xFE00-0xFEFF   Video RAM (512 bytes)
-    0xFF00-0xFFFF   Reserved region (256 bytes)
+    0x0000-0xFCDF   Available RAM (64,736 bytes)
+    0xFCE0-0xFCFF   Semihost device (32 bytes)
+    0xFD00-0xFEFF   Video RAM (512 bytes)
+    0xFF00-0xFFFF   Reserved region (256 bytes, includes 6502 vectors)
 
 **Example: 32-bit CPU (i386, 68000, ARM, etc.)**::
 
