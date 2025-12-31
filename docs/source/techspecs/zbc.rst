@@ -78,98 +78,92 @@ Each ZBC system includes:
 * **Semihosting**: Memory-mapped semihost device (32-byte register interface)
 * **ELF Loader**: Support for loading static ELF executables (``-elfload``)
 * **CPU Init**: Architecture-specific boot code (reset vectors, etc.)
-* **JP1 Jumper**: Configurable VSync interrupt routing (see 2.3)
+* **Timer**: Programmable timer interrupt via semihosting (see 2.3)
 
-2.3 VSync Interrupt Configuration (JP1 Jumper)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+2.3 Timer Configuration (SYS_TIMER_CONFIG)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The ZBC hardware includes a 3-position configuration jumper (JP1) that controls
-how the MC6847 VDG's vertical sync (field sync) signal is routed to the CPU.
-This allows software developers to choose the interrupt behavior that best suits
-their application.
+The ZBC semihosting device provides a programmable timer interrupt that can
+fire at any frequency from 1 Hz to 10 MHz. This replaces the older JP1 jumper
+system with a more flexible software-controlled approach.
 
-**JP1 Jumper Positions**:
+**Configuration via Semihosting**:
 
-* **Position 1-2: Disabled (Default)**
+Timer interrupts are configured using the ``SYS_TIMER_CONFIG`` syscall
+(opcode 0x32) through the RIFF semihosting protocol:
 
-  VSync signal is not connected to CPU interrupts. The MC6847 generates video
-  output normally but does not trigger any CPU interrupts.
+* **rate_hz = 0**: Disable timer (default state after reset)
+* **rate_hz > 0**: Enable periodic timer at the specified frequency in Hz
 
-  **Use case**: Simple test programs, debugging, any code that doesn't need
-  periodic timer interrupts. This is the safe default that prevents unexpected
-  interrupt-related bugs in programs without proper interrupt handlers.
+**Common Timer Rates**:
 
-* **Position 2-3: IRQ (Maskable Interrupt)**
+* **50 Hz**: Retro/8-bit systems, PAL frame sync
+* **60 Hz**: NTSC frame sync
+* **100 Hz**: Embedded systems, older Linux (HZ=100)
+* **1000 Hz**: Modern Linux, RTOS (HZ=1000)
 
-  VSync signal drives the CPU's IRQ line at approximately 60Hz (NTSC) or 62Hz (PAL).
-  The CPU can mask (disable) these interrupts using its interrupt disable flag.
+**STATUS Register (0x19)**:
 
-  **Use case**: Operating system development, cooperative multitasking, applications
-  requiring maskable periodic timing. Suitable for software that needs timer
-  interrupts but also needs the ability to temporarily disable them during
-  critical sections.
+The semihosting STATUS register indicates pending interrupts:
 
-* **Position 3-4: NMI (Non-Maskable Interrupt)**
+* **Value 0**: No interrupt pending
+* **Value 1**: Timer tick occurred
+* **Value 2+**: Reserved for future interrupt sources
 
-  VSync signal drives the CPU's NMI line at approximately 60Hz (NTSC) or 62Hz (PAL).
-  These interrupts cannot be masked by software and will always fire.
+To acknowledge the interrupt and deassert the IRQ line, write 0 to STATUS.
+The timer continues running; the next tick will set STATUS and assert IRQ again.
 
-  **Use case**: Hard real-time systems, preemptive multitasking, watchdog timers,
-  or applications requiring guaranteed periodic execution. Software **must**
-  provide proper NMI handlers or the system will crash.
+**Interrupt Handling**:
 
-**MAME Configuration**:
+When a timer tick occurs:
 
-The jumper setting is controlled via MAME's configuration UI or command-line::
-
-    # View/change jumper setting in MAME UI
-    mame zbcz80 -quik program.bin
-    # Press TAB → Machine Configuration → JP1: VSync Interrupt
-
-    # Set via configuration file (mame.ini or zbcz80.ini)
-    # Add under [zbcz80] section:
-    # (values: 0=Disabled, 1=IRQ, 2=NMI)
-
-**Technical Details**:
-
-The MC6847 VDG generates a field sync (FS) pulse at the start of each video
-frame. In PAL mode (used by ZBC), this occurs at approximately 62.5 Hz based
-on the 4.433619 MHz crystal and 312 scanlines per frame. This signal is
-connected to a callback that conditionally asserts the configured interrupt
-line based on the JP1 jumper setting.
-
-**Historical Context**:
-
-This design mirrors authentic 1980s home computer hardware. For example, the
-Tandy Color Computer and Dragon 32/64 routed the MC6847's FS signal through
-a PIA (Peripheral Interface Adapter) to the CPU's IRQ line, providing a
-system timer without requiring a separate timer IC. The ZBC's jumper-based
-approach provides similar functionality while offering flexibility for
-different use cases.
+1. STATUS register is set to 1
+2. CPU IRQ0 line is asserted (ASSERT_LINE)
+3. ISR reads STATUS to confirm timer interrupt
+4. ISR handles the interrupt
+5. ISR writes 0 to STATUS to acknowledge
+6. IRQ line is deasserted (CLEAR_LINE)
+7. ISR returns with appropriate instruction (RTI, RETI, etc.)
 
 **Programming Considerations**:
 
-When using IRQ or NMI modes, programs must:
+Programs using timer interrupts must:
 
 1. **Install interrupt handlers** at the appropriate vector addresses:
 
-   - Z80 NMI vector: 0x0066
+   - Z80 IRQ: Mode-dependent (IM 0/1/2)
    - 6502 IRQ vector: 0xFFFE-0xFFFF
-   - 6502 NMI vector: 0xFFFA-0xFFFB
+   - ARM: Vector table at 0x00 or 0xFFFF0000
    - (other CPUs: consult CPU-specific documentation)
 
 2. **Return from interrupt** using the appropriate instruction:
 
    - Z80 IRQ: RETI (0xED 0x4D)
-   - Z80 NMI: RETN (0xED 0x45)
    - 6502: RTI (0x40)
+   - ARM: SUBS PC, LR, #4 or equivalent
    - (other CPUs: consult CPU-specific documentation)
 
-3. **Acknowledge interrupts** if required by the CPU architecture
+3. **Acknowledge the interrupt** by writing 0 to STATUS register
 
-Without proper interrupt handlers, enabling JP1 IRQ/NMI modes will cause
-system crashes or memory corruption as the CPU repeatedly pushes return
-addresses onto the stack without returning.
+**Example (6502)**::
+
+    ; Timer ISR for 6502
+    irq_handler:
+        pha                     ; Save A
+        lda SEMIHOST_STATUS     ; Read STATUS (0xFDE0 + 0x19)
+        cmp #1                  ; Timer tick?
+        bne .not_timer
+        inc tick_counter        ; Handle timer
+        lda #0
+        sta SEMIHOST_STATUS     ; Acknowledge interrupt
+    .not_timer:
+        pla                     ; Restore A
+        rti                     ; Return from interrupt
+
+**Error Returns**:
+
+* **ZBC_ERR_OK (0)**: Timer configured successfully
+* **ZBC_ERR_INVALID_ARG (-13)**: Rate too high (>10 MHz)
 
 2.4 Dynamic Memory Layout Calculation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -514,13 +508,18 @@ The semihost device occupies 32 bytes of address space::
     0x00    8     SIGNATURE   R       ASCII "SEMIHOST" (device detection)
     0x08    16    RIFF_PTR    RW      Pointer to RIFF buffer (native endian)
     0x18    1     DOORBELL    W       Write triggers request processing
-    0x19    1     IRQ_STATUS  R       Bit 0: response ready, Bit 1: error
-    0x1A    1     IRQ_ENABLE  RW      Bit 0: enable IRQ on response (default 0)
-    0x1B    1     IRQ_ACK     W       Write 1 to clear IRQ bits
-    0x1C    1     STATUS      R       Bit 0: response ready, Bit 7: device present
-    0x1D-1F 3     (reserved)  -       Padding to 32 bytes
+    0x19    1     STATUS      RW      Interrupt pending (write 0 to clear)
+    0x1A-1F 6     (reserved)  -       Padding to 32 bytes
 
 For a 16-bit CPU, the device is at 0xFDE0-0xFDFF.
+
+**STATUS Register (0x19)**:
+
+* **Value 0**: No interrupt pending
+* **Value 1**: Timer tick occurred (from SYS_TIMER_CONFIG)
+* **Value 2+**: Reserved for future interrupt sources
+
+Write 0 to STATUS to acknowledge the interrupt and deassert the IRQ line.
 
 6.3 Request Flow
 ~~~~~~~~~~~~~~~~
@@ -530,26 +529,33 @@ For a 16-bit CPU, the device is at 0xFDE0-0xFDFF.
 3. Guest writes buffer address to RIFF_PTR (offset 0x08)
 4. Guest writes any value to DOORBELL (offset 0x18)
 5. Device processes request synchronously
-6. Device sets STATUS bit 0 (response ready)
-7. Guest reads response from RIFF buffer
+6. Guest reads response from RIFF buffer
 
 Programs can use semihosting calls to:
 
 * Write debug output to console (SYS_WRITE0, SYS_WRITEC)
 * Read/write files on the host filesystem (sandboxed to ~/.mame/semihost/)
 * Get system time and clock information
+* Configure timer interrupts (SYS_TIMER_CONFIG)
 * Exit cleanly
 
-6.4 Interrupt Support
-~~~~~~~~~~~~~~~~~~~~~
+6.4 Timer Interrupts
+~~~~~~~~~~~~~~~~~~~~
 
-The semihost device can optionally generate an IRQ when a request completes.
-This is **disabled by default** - guest programs must explicitly opt-in by
-writing to the IRQ_ENABLE register.
+The semihost device provides a programmable timer via the SYS_TIMER_CONFIG
+syscall (opcode 0x32). When enabled, the timer fires at the configured
+frequency and:
 
-Semihost completion uses IRQ1, separate from the VSync interrupt (IRQ0/NMI
-controlled by JP1 jumper). This allows programs to use either or both
-interrupt sources independently.
+1. Sets STATUS register to 1
+2. Asserts the CPU's IRQ0 line
+
+The guest ISR must:
+
+1. Read STATUS to confirm timer interrupt (value 1)
+2. Handle the interrupt
+3. Write 0 to STATUS to acknowledge and deassert IRQ
+
+See section 2.3 for detailed timer configuration information.
 
 7. Usage Examples
 -----------------

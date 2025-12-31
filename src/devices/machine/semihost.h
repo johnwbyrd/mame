@@ -4,11 +4,12 @@
 
     semihost.h
 
-    ZBC Semihosting Device - provides file I/O, console, and time services
-    to guest programs via memory-mapped RIFF-based protocol.
+    ZBC Semihosting Device - provides file I/O, console, time services,
+    and timer interrupts to guest programs via memory-mapped RIFF-based
+    protocol.
 
     Files are sandboxed to MAME's share_directory (configurable via
--share_directory).
+    -share_directory).
 
 ***************************************************************************/
 
@@ -21,6 +22,7 @@ extern "C" {
 #include "semihost/include/zbc_backend.h"
 #include "semihost/include/zbc_backend_ansi.h"
 #include "semihost/include/zbc_host.h"
+#include "semihost/include/zbc_protocol.h"
 }
 
 class semihost_device : public device_t {
@@ -64,9 +66,11 @@ class semihost_device : public device_t {
 
 	// Device registers
 	u8 m_riff_ptr[16]; // Supports up to 128-bit guest pointers
-	u8 m_irq_status;
-	u8 m_irq_enable;
-	u8 m_status;
+	u8 m_status;       // Interrupt pending indicator (0 = none, 1 = timer, etc.)
+
+	// Timer state
+	emu_timer *m_timer;     // Periodic timer for interrupts
+	u32 m_timer_rate;       // Current rate in Hz (0 = disabled)
 
 	// Configuration and references
 	std::string m_cpu_tag;
@@ -75,7 +79,8 @@ class semihost_device : public device_t {
 
 	// Internal methods
 	void process_request();
-	void update_irq();
+	int handle_timer_config(u32 rate_hz);
+	TIMER_CALLBACK_MEMBER(timer_tick);
 
 	// Static callbacks for C library
 	static u8 mem_read_u8(u64 addr, void *ctx);
@@ -85,6 +90,7 @@ class semihost_device : public device_t {
 	                            void *ctx);
 	static void on_exit_callback(void *ctx, unsigned int reason,
 	                             unsigned int subcode);
+	static void on_timer_config_callback(void *ctx, unsigned int rate_hz);
 };
 
 DECLARE_DEVICE_TYPE(SEMIHOST, semihost_device)

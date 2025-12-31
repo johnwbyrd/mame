@@ -124,9 +124,6 @@ class zbc_state : public driver_device {
 	    VRAM_SIZE - 1; // 0x1FF - mask for VRAM indexing
 	static constexpr zbc_size_t SEMIHOST_SIZE = 32; // Semihost device registers
 
-	// VSync interrupt configuration (JP1 jumper)
-	bool m_vsync_interrupt_enabled = false;
-	int m_interrupt_line = INPUT_LINE_IRQ0;
 
 	// Console display driver
 	MC6847Console m_console;
@@ -135,7 +132,6 @@ class zbc_state : public driver_device {
 	void init_screen();
 
 	uint8_t vdg_videoram_r(offs_t offset);
-	void vdg_fsync(int state);
 
 	// Calculate video RAM address - placed near top of address space.
 	// For n-bit space, VRAM starts at (2^n - 2^(n/2)) leaving proportional high
@@ -243,18 +239,6 @@ uint8_t zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::vdg_videoram_r(
 	// MC6847 VDG reads character codes from video RAM for display.
 	// Called ~15,000 times/second as VDG scans the 32x16 character grid.
 	return m_videoram[offset & VRAM_MASK]; // Mask to 512-byte range
-}
-
-template <typename CPU_TYPE, zbc_speed_t CPU_SPEED, zbc_addr_t VRAM_ADDR>
-void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::vdg_fsync(
-    int state) {
-	// MC6847 field sync callback - fires at ~60Hz (PAL: ~62Hz)
-	// Only trigger interrupt on rising edge (0 -> 1 transition) if enabled
-	if (!state || !m_vsync_interrupt_enabled)
-		return;
-
-	// Assert the configured interrupt line (IRQ or NMI based on JP1 jumper)
-	m_maincpu->set_input_line(m_interrupt_line, ASSERT_LINE);
 }
 
 template <typename CPU_TYPE, zbc_speed_t CPU_SPEED, zbc_addr_t VRAM_ADDR>
@@ -407,25 +391,6 @@ void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::machine_start() {
 template <typename CPU_TYPE, zbc_speed_t CPU_SPEED, zbc_addr_t VRAM_ADDR>
 void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::machine_reset() {
 	init_screen();
-
-	// Configure VSync interrupt based on JP1 jumper setting
-	uint8_t jumper_config = ioport("CONFIG")->read() & 0x03;
-	switch (jumper_config) {
-	case 0x00: // Disabled (default - safe for simple programs)
-		m_vsync_interrupt_enabled = false;
-		break;
-	case 0x01: // IRQ mode (maskable interrupts for OS development)
-		m_vsync_interrupt_enabled = true;
-		m_interrupt_line = INPUT_LINE_IRQ0;
-		break;
-	case 0x02: // NMI mode (non-maskable interrupts for OS development)
-		m_vsync_interrupt_enabled = true;
-		m_interrupt_line = INPUT_LINE_NMI;
-		break;
-	default:
-		m_vsync_interrupt_enabled = false;
-		break;
-	}
 }
 
 template <typename CPU_TYPE, zbc_speed_t CPU_SPEED, zbc_addr_t VRAM_ADDR>
@@ -439,18 +404,15 @@ void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::zbc(
 
 	MC6847(config, m_vdg, 4.433619_MHz_XTAL, true); // PAL mode
 	m_vdg->set_screen("screen");
-	// VSync field sync - optionally drives CPU interrupt based on JP1 jumper
-	m_vdg->fsync_wr_callback().set(FUNC(zbc_state::vdg_fsync));
 	m_vdg->input_callback().set(FUNC(zbc_state::vdg_videoram_r));
 
-	// Semihosting device - provides file I/O, console, and time services
-	// Guest programs write RIFF buffer address to RIFF_PTR, then trigger
-	// DOORBELL
+	// Semihosting device - provides file I/O, console, time services, and
+	// timer interrupts. Guest programs configure timer via SYS_TIMER_CONFIG
+	// syscall, acknowledge interrupts by writing 0 to STATUS register.
 	SEMIHOST(config, m_semihost, 0);
 	m_semihost->set_cpu_tag("maincpu");
-	// Semihost completion IRQ on IRQ1 (separate from VSync on IRQ0/NMI)
-	// IRQ is disabled by default - guest must enable via IRQ_ENABLE register
-	m_semihost->irq_callback().set_inputline(m_maincpu, INPUT_LINE_IRQ1);
+	// Timer interrupt on IRQ0 - guest configures rate via SYS_TIMER_CONFIG
+	m_semihost->irq_callback().set_inputline(m_maincpu, INPUT_LINE_IRQ0);
 
 	ELFLOAD(config, "elfload").set_cpu(m_maincpu);
 }
@@ -460,10 +422,9 @@ void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::zbc(
 // ============================================================================
 // INPUT_PORTS - Shared configuration for all ZBC variants
 // ============================================================================
-static INPUT_PORTS_START(zbc) PORT_START("CONFIG")
-    PORT_CONFNAME(0x03, 0x00, "JP1: VSync Interrupt")
-        PORT_CONFSETTING(0x00, "Disabled") PORT_CONFSETTING(0x01, "IRQ")
-            PORT_CONFSETTING(0x02, "NMI") INPUT_PORTS_END
+static INPUT_PORTS_START(zbc)
+	// No hardware jumpers - all configuration via semihosting syscalls
+INPUT_PORTS_END
 
 // ============================================================================
 // DEFINE_ZBC Macro - Generates complete ZBC variant in a single line
