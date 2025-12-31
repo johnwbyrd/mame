@@ -76,6 +76,7 @@ typedef uint32_t uintptr_t;
 #define SH_SYS_EXIT_EXTENDED  0x20
 #define SH_SYS_ELAPSED        0x30
 #define SH_SYS_TICKFREQ       0x31
+#define SH_SYS_TIMER_CONFIG   0x32  /* Configure periodic timer interrupt */
 
 /*========================================================================
  * Open mode flags (ARM semihosting compatible)
@@ -139,11 +140,22 @@ typedef uint32_t uintptr_t;
 #define ZBC_REG_SIGNATURE   0x00  /* 8 bytes, R - ASCII "SEMIHOST" */
 #define ZBC_REG_RIFF_PTR    0x08  /* 16 bytes, RW - pointer to RIFF buffer */
 #define ZBC_REG_DOORBELL    0x18  /* 1 byte, W - write to trigger request */
-#define ZBC_REG_IRQ_STATUS  0x19  /* 1 byte, R - interrupt status flags */
-#define ZBC_REG_IRQ_ENABLE  0x1A  /* 1 byte, RW - interrupt enable mask */
-#define ZBC_REG_IRQ_ACK     0x1B  /* 1 byte, W - write 1s to clear IRQ bits */
-#define ZBC_REG_STATUS      0x1C  /* 1 byte, R - device status flags */
+#define ZBC_REG_STATUS      0x19  /* 1 byte, RW - interrupt pending (write 0 to clear) */
 #define ZBC_REG_SIZE        0x20  /* Total register space: 32 bytes */
+
+/*========================================================================
+ * STATUS register values (at offset 0x19)
+ *
+ * The STATUS register indicates pending interrupt sources:
+ *   0 = No interrupt pending
+ *   1 = Timer tick occurred (from SYS_TIMER_CONFIG)
+ *   2+ = Reserved for future interrupt sources
+ *
+ * Write 0 to STATUS to acknowledge the interrupt and deassert IRQ.
+ *========================================================================*/
+
+#define ZBC_STATUS_NONE   0  /* No interrupt pending */
+#define ZBC_STATUS_TIMER  1  /* Timer tick occurred */
 
 /*========================================================================
  * Signature bytes
@@ -159,20 +171,6 @@ typedef uint32_t uintptr_t;
 #define ZBC_SIGNATURE_BYTE5  0x4F  /* 'O' */
 #define ZBC_SIGNATURE_BYTE6  0x53  /* 'S' */
 #define ZBC_SIGNATURE_BYTE7  0x54  /* 'T' */
-
-/*========================================================================
- * STATUS register bits
- *========================================================================*/
-
-#define ZBC_STATUS_RESPONSE_READY  0x01  /* Bit 0: response available */
-#define ZBC_STATUS_DEVICE_PRESENT  0x80  /* Bit 7: device exists */
-
-/*========================================================================
- * IRQ bits
- *========================================================================*/
-
-#define ZBC_IRQ_RESPONSE_READY  0x01
-#define ZBC_IRQ_ERROR           0x02
 
 /*========================================================================
  * Library error codes
@@ -912,13 +910,17 @@ typedef struct {
 } zbc_parsed_t;
 
 /**
- * Parse a RIFF SEMI buffer into a zbc_parsed_t structure.
+ * Parse a RIFF SEMI request buffer into a zbc_parsed_t structure.
  *
- * This is the single entry point for parsing. It walks all chunks,
- * extracts relevant fields, and populates the parsed structure.
- * After this call, the caller can simply check fields like:
+ * This is the host-side entry point for parsing client requests.
+ * It walks all chunks (CNFG/CALL/PARM/DATA), extracts relevant fields,
+ * and populates the parsed structure. After this call, the caller can
+ * simply check fields like:
  *
- *     if (parsed.has_retn) { use parsed.result; }
+ *     if (parsed.has_call) { dispatch parsed.opcode; }
+ *
+ * Note: Clients should not call this function. Client response parsing
+ * is done internally by zbc_parse_response() which only extracts RETN/ERRO.
  *
  * @param[out] out  Receives parsed structure
  * @param buf       RIFF buffer to parse
@@ -927,8 +929,8 @@ typedef struct {
  * @param endian    Guest endianness (ZBC_ENDIAN_*)
  * @return ZBC_OK on success, error code on parse failure
  */
-int zbc_riff_parse(zbc_parsed_t *out, const uint8_t *buf, size_t buf_size,
-                   int int_size, int endian);
+int zbc_riff_parse_request(zbc_parsed_t *out, const uint8_t *buf, size_t buf_size,
+                           int int_size, int endian);
 
 #ifdef __cplusplus
 }
