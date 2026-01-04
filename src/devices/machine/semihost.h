@@ -83,10 +83,10 @@ class semihost_device : public device_t {
 	TIMER_CALLBACK_MEMBER(timer_tick);
 
 	// Static callbacks for C library
-	static u8 mem_read_u8(u64 addr, void *ctx);
-	static void mem_write_u8(u64 addr, u8 val, void *ctx);
-	static void mem_read_block(void *dest, u64 addr, size_t size, void *ctx);
-	static void mem_write_block(u64 addr, const void *src, size_t size,
+	static u8 mem_read_u8(uintptr_t addr, void *ctx);
+	static void mem_write_u8(uintptr_t addr, u8 val, void *ctx);
+	static void mem_read_block(void *dest, uintptr_t addr, size_t size, void *ctx);
+	static void mem_write_block(uintptr_t addr, const void *src, size_t size,
 	                            void *ctx);
 	static void on_exit_callback(void *ctx, unsigned int reason,
 	                             unsigned int subcode);

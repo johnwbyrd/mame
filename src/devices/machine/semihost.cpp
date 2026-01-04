@@ -194,17 +194,17 @@ TIMER_CALLBACK_MEMBER(semihost_device::timer_tick)
 	LOGTIMER("semihost: timer tick, STATUS=%d, asserting IRQ\n", m_status);
 }
 
-u8 semihost_device::mem_read_u8(u64 addr, void *ctx)
+u8 semihost_device::mem_read_u8(uintptr_t addr, void *ctx)
 {
 	return static_cast<semihost_device *>(ctx)->m_cpu->space(AS_PROGRAM).read_byte(addr);
 }
 
-void semihost_device::mem_write_u8(u64 addr, u8 val, void *ctx)
+void semihost_device::mem_write_u8(uintptr_t addr, u8 val, void *ctx)
 {
 	static_cast<semihost_device *>(ctx)->m_cpu->space(AS_PROGRAM).write_byte(addr, val);
 }
 
-void semihost_device::mem_read_block(void *dest, u64 addr, size_t size, void *ctx)
+void semihost_device::mem_read_block(void *dest, uintptr_t addr, size_t size, void *ctx)
 {
 	address_space &space = static_cast<semihost_device *>(ctx)->m_cpu->space(AS_PROGRAM);
 	u8 *dst = static_cast<u8 *>(dest);
@@ -212,7 +212,7 @@ void semihost_device::mem_read_block(void *dest, u64 addr, size_t size, void *ct
 		dst[i] = space.read_byte(addr + i);
 }
 
-void semihost_device::mem_write_block(u64 addr, const void *src, size_t size, void *ctx)
+void semihost_device::mem_write_block(uintptr_t addr, const void *src, size_t size, void *ctx)
 {
 	address_space &space = static_cast<semihost_device *>(ctx)->m_cpu->space(AS_PROGRAM);
 	const u8 *s = static_cast<const u8 *>(src);
