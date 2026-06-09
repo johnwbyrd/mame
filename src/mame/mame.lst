@@ -49602,7 +49602,7 @@ monymony
 monymony2
 monymony3
 
-@source:zbc/zbcgen.ipp
+@source:zbc/zbc.cpp
 zbc5a22
 zbcadsp21062
 zbcam186em
