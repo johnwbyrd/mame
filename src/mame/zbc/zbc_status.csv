@@ -339,7 +339,7 @@ unsp_12,UNSP_12,unsp_12_device,SunPlus u'nSP (ISA 1.2),broken_validate,cpu/unsp/
 unsp_20,UNSP_20,unsp_20_device,SunPlus u'nSP (ISA 2.0),broken_validate,cpu/unsp/unsp.h,Test failed: Unknown error -9 (exit -9)
 upd7725,UPD7725,upd7725_device,NEC uPD7725,working,cpu/upd7725/upd7725.h,
 upd7751,UPD7751,upd7751_device,NEC uPD7751,broken_validate,cpu/mcs48/mcs48.h,Test failed: Unknown error -11 (exit -11)
-upd7801,UPD7801,upd7801_device,NEC uPD7801,working,cpu/upd7810/upd7810.h,
+upd7801,UPD7801,upd7801_device,NEC uPD7801,needs_internal_rom,cpu/upd7810/upd7810.h,Requires internal ROM/RAM regions not provided by ZBC
 upd7807,UPD7807,upd7807_device,NEC uPD7807,working,cpu/upd7810/upd7810.h,
 upd7810,UPD7810,upd7810_device,NEC uPD7810,working,cpu/upd7810/upd7810.h,
 upd7811,UPD7811,upd7811_device,NEC uPD7811,needs_internal_rom,cpu/upd7810/upd7810.h,Requires internal ROM/RAM regions not provided by ZBC
