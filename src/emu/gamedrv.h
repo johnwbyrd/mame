@@ -185,6 +185,7 @@ public:
 			struct GAME_TRAITS_NAME(NAME) \
 			{ \
 				static inline constexpr char const *const shortname = #NAME; \
+				static inline constexpr char const *const typename_str = #NAME; \
 				static inline constexpr char const *const source = __FILE__; \
 				static inline constexpr auto const *const manufacturer = (COMPANY); \
 				static constexpr std::remove_reference_t<decltype((FULLNAME)[0])> const fullname[] = (FULLNAME); \

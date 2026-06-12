@@ -216,6 +216,7 @@ private:
 	create_func const m_creator;
 	std::type_info const &m_type;
 	char const *const m_shortname;
+	char const *const m_typename;
 	char const *const m_fullname;
 	char const *const m_source;
 	device_flags::type const m_emulation_flags;
@@ -232,6 +233,7 @@ public:
 		: m_creator(nullptr)
 		, m_type(typeid(std::nullptr_t))
 		, m_shortname(nullptr)
+		, m_typename(nullptr)
 		, m_fullname(nullptr)
 		, m_source(nullptr)
 		, m_emulation_flags(device_flags::NONE)
@@ -247,6 +249,7 @@ public:
 		: m_creator(&create_device<DeviceClass>)
 		, m_type(typeid(DeviceClass))
 		, m_shortname(Traits::shortname)
+		, m_typename(Traits::typename_str)
 		, m_fullname((char const *)Traits::fullname)
 		, m_source(Traits::source)
 		, m_emulation_flags(DeviceClass::emulation_flags())
@@ -262,6 +265,7 @@ public:
 		: m_creator(&create_driver<DriverClass>)
 		, m_type(typeid(DriverClass))
 		, m_shortname(Traits::shortname)
+		, m_typename(Traits::typename_str)
 		, m_fullname((char const *)Traits::fullname)
 		, m_source(Traits::source)
 		, m_emulation_flags(DriverClass::emulation_flags() | Flags)
@@ -274,6 +278,7 @@ public:
 
 	std::type_info const &type() const { return m_type; }
 	char const *shortname() const { return m_shortname; }
+	char const *typename_() const { return m_typename; }
 	char const *fullname() const { return m_fullname; }
 	char const *source() const { return m_source; }
 	device_flags::type emulation_flags() const { return m_emulation_flags; }
@@ -407,6 +412,7 @@ extern emu::detail::device_registrar const registered_device_types;
 			struct Type##_device_traits \
 			{ \
 				static inline constexpr char const *const shortname = (ShortName); \
+				static inline constexpr char const *const typename_str = #Type; \
 				static inline constexpr char const *const source = __FILE__; \
 				static constexpr std::remove_reference_t<decltype((FullName)[0])> const fullname[] = (FullName); \
 			}; \
@@ -449,6 +455,7 @@ extern emu::detail::device_registrar const registered_device_types;
 			struct Type##_device_traits \
 			{ \
 				static inline constexpr char const *const shortname = (ShortName); \
+				static inline constexpr char const *const typename_str = #Type; \
 				static inline constexpr char const *const source = __FILE__; \
 				static constexpr std::remove_reference_t<decltype((FullName)[0])> const fullname[] = (FullName); \
 			}; \

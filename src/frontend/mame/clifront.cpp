@@ -432,8 +432,8 @@ void cli_frontend::listsource(const std::vector<std::string> &args)
 void cli_frontend::listcpu(const std::vector<std::string> &args)
 {
 	// Collect all CPUs first for sorting
-	// tuple: shortname, C++ class name, fullname
-	std::vector<std::tuple<std::string, std::string, std::string>> cpus;
+	// tuple: shortname, device type constant, C++ class name, fullname
+	std::vector<std::tuple<std::string, std::string, std::string, std::string>> cpus;
 
 	apply_device_action(
 			args,
@@ -443,6 +443,9 @@ void cli_frontend::listcpu(const std::vector<std::string> &args)
 				device_execute_interface *exec = nullptr;
 				if (device.interface(exec))
 				{
+					// Get the device type constant name (e.g., "PENTIUM", "M6502")
+					std::string typename_const = device.type().typename_();
+
 					std::string class_name;
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -458,7 +461,7 @@ void cli_frontend::listcpu(const std::vector<std::string> &args)
 					class_name = "";
 #endif
 
-					cpus.emplace_back(device.shortname(), class_name, device.name());
+					cpus.emplace_back(device.shortname(), typename_const, class_name, device.name());
 				}
 			});
 
@@ -470,30 +473,32 @@ void cli_frontend::listcpu(const std::vector<std::string> &args)
 	if (!cpus.empty())
 	{
 #if defined(__GNUC__) || defined(__clang__)
-		// GCC/Clang: 3 columns with device name
-		osd_printf_info("Short name:       Device name:                  Full name:\n");
+		// GCC/Clang: 4 columns with device type constant and class name
+		osd_printf_info("Short name:       Device type:      Device class:         Full name:\n");
 		for (const auto &cpu : cpus)
 		{
 			// Replace double quotes with single quotes in full name
-			std::string fullname = std::get<2>(cpu);
+			std::string fullname = std::get<3>(cpu);
 			std::replace(fullname.begin(), fullname.end(), '"', '\'');
 
-			osd_printf_info("%-17s %-29s \"%s\"\n",
+			osd_printf_info("%-17s %-17s %-21s \"%s\"\n",
 				std::get<0>(cpu).c_str(),
 				std::get<1>(cpu).c_str(),
+				std::get<2>(cpu).c_str(),
 				fullname.c_str());
 		}
 #else
-		// MSVC: 2 columns without device name
-		osd_printf_info("Short name:       Full name:\n");
+		// MSVC: 3 columns with device type constant
+		osd_printf_info("Short name:       Device type:      Full name:\n");
 		for (const auto &cpu : cpus)
 		{
 			// Replace double quotes with single quotes in full name
-			std::string fullname = std::get<2>(cpu);
+			std::string fullname = std::get<3>(cpu);
 			std::replace(fullname.begin(), fullname.end(), '"', '\'');
 
-			osd_printf_info("%-17s \"%s\"\n",
+			osd_printf_info("%-17s %-17s \"%s\"\n",
 				std::get<0>(cpu).c_str(),
+				std::get<1>(cpu).c_str(),
 				fullname.c_str());
 		}
 #endif
