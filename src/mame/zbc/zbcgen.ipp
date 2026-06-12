@@ -5,6 +5,12 @@
 // This file is #included by zbc.cpp, not compiled separately.
 // Do not add #include directives here.
 //
+// The #line directive forces __FILE__ to resolve to zbc.cpp for the
+// COMP() expansions below. MAME's GAME_DRIVER_TRAITS records __FILE__
+// as the driver's sourcefile and makedep.py rejects any mismatch with
+// the @source:zbc/zbc.cpp entry in mame.lst.
+#line 1 "src/mame/zbc/zbc.cpp"
+//
 // Statistics:
 //   Total CPUs discovered: 391
 //   working: 271

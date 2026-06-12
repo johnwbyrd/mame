@@ -407,6 +407,13 @@ class ZBCGenerator:
             f.write("// This file is #included by zbc.cpp, not compiled separately.\n")
             f.write("// Do not add #include directives here.\n")
             f.write("//\n")
+            f.write("// The #line directive forces __FILE__ to resolve to zbc.cpp\n")
+            f.write("// for the COMP() expansions below. MAME's GAME_DRIVER_TRAITS\n")
+            f.write("// records __FILE__ as the driver's sourcefile and makedep.py\n")
+            f.write("// rejects any mismatch with the @source:zbc/zbc.cpp entry in\n")
+            f.write("// mame.lst.\n")
+            f.write('#line 1 "src/mame/zbc/zbc.cpp"\n')
+            f.write("//\n")
             f.write("// Statistics:\n")
             f.write(f"//   Total CPUs discovered: {len(self.cpus)}\n")
             for status in ALL_STATUSES:
