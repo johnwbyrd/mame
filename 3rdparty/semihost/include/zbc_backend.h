@@ -89,6 +89,113 @@ typedef struct zbc_backend_s {
     int (*get_errno)(void *ctx);
     /** Configure periodic timer. rate_hz=0 disables. Returns 0 on success. */
     int (*timer_config)(void *ctx, unsigned int rate_hz);
+
+    /*
+     * Linux-extension operations. Implemented incrementally as the
+     * passthrough story needs them; the wire format for each opcode
+     * lives in include/shared/zbc_protocol.h.
+     */
+
+    /**
+     * Stat a path. Writes the SH_STAT_BUF_SIZE-byte response struct
+     * (ino[8] mode[4] nlink[4] size[8] mtime[8] atime[8] ctime[8],
+     * all little-endian) into stat_buf. Returns 0 on success, -1 on
+     * error.
+     */
+    int (*stat)(void *ctx, const char *path, size_t path_len, void *stat_buf);
+
+    /**
+     * Open a directory for enumeration. Returns a non-negative dir
+     * handle on success, -1 on error. The handle is host-defined; the
+     * guest treats it as opaque and only passes it to readdir/closedir.
+     */
+    int (*opendir)(void *ctx, const char *path, size_t path_len);
+
+    /**
+     * Read one directory entry. Writes a single entry in SYS_READDIR
+     * wire layout (d_ino[8] d_type[1] d_namlen[1] d_name[d_namlen+1])
+     * into buf. Returns the number of bytes written (> 0), 0 at end
+     * of directory, or -1 on error.
+     */
+    int (*readdir)(void *ctx, int dir_handle, void *buf, size_t buf_size);
+
+    /**
+     * Release a dir handle from opendir. Returns 0 on success, -1 on
+     * error (e.g. handle was never opened or already closed).
+     */
+    int (*closedir)(void *ctx, int dir_handle);
+
+    /**
+     * Non-blocking console char read. Returns 0-255 if a character is
+     * available, -1 if none. -1 is not an error -- it just means the
+     * caller should poll again later. Hosts implement this with
+     * select()/poll() on stdin with a zero timeout.
+     */
+    int (*readc_poll)(void *ctx);
+
+    /**
+     * Stat an open file by descriptor. Writes the same 48-byte
+     * little-endian struct as stat(). Returns 0 on success, -1 on
+     * error.
+     */
+    int (*fstat)(void *ctx, int fd, void *stat_buf);
+
+    /**
+     * Create a directory at path. mode is passed through (may be
+     * filtered by host umask or ignored on platforms without POSIX
+     * permission bits). Returns 0 on success, -1 on error.
+     */
+    int (*mkdir)(void *ctx, const char *path, size_t path_len, int mode);
+
+    /**
+     * Remove an empty directory at path. Returns 0 on success, -1 on
+     * error (including ENOTEMPTY).
+     */
+    int (*rmdir)(void *ctx, const char *path, size_t path_len);
+
+    /**
+     * Truncate an open file to length bytes. Length is unsigned 64-bit
+     * so a 16-bit guest can still describe sizes beyond its address
+     * space. Returns 0 on success, -1 on error.
+     */
+    int (*ftruncate)(void *ctx, int fd, uint64_t length);
+
+    /**
+     * Flush dirty buffers for an open file to storage. Returns 0 on
+     * success, -1 on error.
+     */
+    int (*fsync)(void *ctx, int fd);
+
+    /**
+     * Create a hard link new_path -> old_path. Returns 0 on success,
+     * -1 on error.
+     */
+    int (*link)(void *ctx, const char *old_path, size_t old_len,
+                const char *new_path, size_t new_len);
+
+    /**
+     * Create a symbolic link at linkpath that points to target.
+     * Returns 0 on success, -1 on error.
+     */
+    int (*symlink)(void *ctx, const char *target, size_t target_len,
+                   const char *linkpath, size_t linkpath_len);
+
+    /**
+     * Read the target of a symbolic link at path. Writes up to
+     * buf_size bytes (NOT NUL-terminated). Returns the number of
+     * bytes written on success, -1 on error (matches POSIX
+     * readlink(2)).
+     */
+    int (*readlink)(void *ctx, const char *path, size_t path_len,
+                    void *buf, size_t buf_size);
+
+    /**
+     * Stat a path without following the terminal symlink. Same
+     * 48-byte response layout as stat(). Returns 0 on success, -1 on
+     * error.
+     */
+    int (*lstat)(void *ctx, const char *path, size_t path_len,
+                 void *stat_buf);
 } zbc_backend_t;
 
 /*========================================================================

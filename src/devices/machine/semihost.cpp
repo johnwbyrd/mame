@@ -227,7 +227,7 @@ void semihost_device::on_exit_callback(void *ctx, unsigned int reason, unsigned 
 	dev->machine().schedule_exit();
 }
 
-void semihost_device::on_timer_config_callback(void *ctx, unsigned int rate_hz)
+int semihost_device::on_timer_config_callback(void *ctx, unsigned int rate_hz)
 {
-	static_cast<semihost_device *>(ctx)->handle_timer_config(rate_hz);
+	return static_cast<semihost_device *>(ctx)->handle_timer_config(rate_hz);
 }

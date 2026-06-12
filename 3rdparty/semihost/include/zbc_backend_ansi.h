@@ -19,10 +19,12 @@ extern "C" {
  *========================================================================*/
 
 #define ZBC_ANSI_MAX_FILES       64    /**< Maximum simultaneously open files */
+#define ZBC_ANSI_MAX_DIRS        8     /**< Maximum simultaneously open dirs */
 #define ZBC_ANSI_MAX_PATH_RULES  16    /**< Maximum additional path rules */
 #define ZBC_ANSI_SANDBOX_DIR_MAX 512   /**< Maximum sandbox directory path length */
 #define ZBC_ANSI_PATH_BUF_MAX    1024  /**< Maximum resolved path length */
 #define ZBC_ANSI_FIRST_FD        3     /**< First FD to allocate (0-2 are stdio) */
+#define ZBC_ANSI_FIRST_DIR_HANDLE 256  /**< First dir handle; well above max FD */
 
 /*========================================================================
  * Configuration flags
@@ -134,7 +136,12 @@ typedef struct zbc_ansi_state_s {
     /*--- Callbacks ---*/
     void (*on_violation)(void *ctx, int type, const char *detail);  /**< Violation callback */
     void (*on_exit)(void *ctx, unsigned int reason, unsigned int subcode);  /**< Exit callback */
-    void (*on_timer_config)(void *ctx, unsigned int rate_hz);  /**< Timer config callback */
+    /**
+     * Timer config callback. Return 0 on success, non-zero if the rate is
+     * not achievable; a non-zero return is reported to the guest as
+     * -1 with errno EINVAL (per spec SYS_TIMER_CONFIG).
+     */
+    int (*on_timer_config)(void *ctx, unsigned int rate_hz);
     void *callback_ctx;                /**< Context for callbacks */
 
     /*--- Internal: file descriptor table (void* to avoid stdio.h dep) ---*/
@@ -142,6 +149,9 @@ typedef struct zbc_ansi_state_s {
     zbc_ansi_fd_node_t fd_pool[ZBC_ANSI_MAX_FILES];
     zbc_ansi_fd_node_t *free_fd_list;
     int next_fd;
+
+    /*--- Internal: directory handle table (void* = DIR*) ---*/
+    void *dirs[ZBC_ANSI_MAX_DIRS];
 
     /*--- Internal: other state ---*/
     int last_errno;
@@ -196,7 +206,9 @@ void zbc_ansi_set_policy(zbc_ansi_state_t *state,
  * @param state           Initialized state
  * @param on_violation    Called when operation is blocked (may be NULL)
  * @param on_exit         Called when exit() is intercepted (may be NULL)
- * @param on_timer_config Called when timer is configured (may be NULL)
+ * @param on_timer_config Called when timer is configured (may be NULL).
+ *                        Return 0 on success, non-zero if the rate is not
+ *                        achievable (guest receives -1 with errno EINVAL).
  * @param ctx             Context passed to callbacks
  */
 void zbc_ansi_set_callbacks(zbc_ansi_state_t *state,
@@ -204,8 +216,8 @@ void zbc_ansi_set_callbacks(zbc_ansi_state_t *state,
                                                  const char *detail),
                             void (*on_exit)(void *ctx, unsigned int reason,
                                             unsigned int subcode),
-                            void (*on_timer_config)(void *ctx,
-                                                    unsigned int rate_hz),
+                            int (*on_timer_config)(void *ctx,
+                                                   unsigned int rate_hz),
                             void *ctx);
 
 /**
@@ -232,6 +244,9 @@ typedef struct zbc_ansi_insecure_state_s {
     zbc_ansi_fd_node_t fd_pool[ZBC_ANSI_MAX_FILES];
     zbc_ansi_fd_node_t *free_fd_list;
     int next_fd;
+
+    /*--- Internal: directory handle table (void* = DIR*) ---*/
+    void *dirs[ZBC_ANSI_MAX_DIRS];
 
     /*--- Internal: other state ---*/
     int last_errno;

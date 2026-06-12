@@ -10,8 +10,19 @@
  */
 
 #include "zbc_ansi_internal.h"
+#include <errno.h>
 #include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
 #include <time.h>
+#ifdef _WIN32
+#include <direct.h>  /* _mkdir, _rmdir */
+#include <io.h>      /* _chsize_s, _commit, _fileno */
+#else
+#include <dirent.h>
+#include <sys/select.h>
+#include <unistd.h>
+#endif
 
 /*========================================================================
  * FD Management
@@ -168,6 +179,31 @@ int zbc_ansi_readc(void) {
   return c;
 }
 
+int zbc_ansi_readc_poll(void) {
+#ifdef _WIN32
+  /* Windows console I/O has no select() equivalent. Always report
+   * "no character"; the guest can fall back to SYS_READC if it needs
+   * blocking input. */
+  return -1;
+#else
+  fd_set rfds;
+  struct timeval tv;
+  unsigned char c;
+
+  FD_ZERO(&rfds);
+  FD_SET(0, &rfds);
+  tv.tv_sec = 0;
+  tv.tv_usec = 0;
+  if (select(1, &rfds, (fd_set *)0, (fd_set *)0, &tv) <= 0) {
+    return -1;
+  }
+  if (read(0, &c, 1) != 1) {
+    return -1;
+  }
+  return (int)c;
+#endif
+}
+
 /*========================================================================
  * Status Functions
  *========================================================================*/
@@ -216,4 +252,192 @@ int zbc_ansi_heapinfo(uintptr_t *heap_base, uintptr_t *heap_limit,
   *stack_base = 0;
   *stack_limit = 0;
   return 0;
+}
+
+/*========================================================================
+ * Linux extensions
+ *========================================================================*/
+
+/* Little-endian writers for the fixed 48-byte stat layout. We do this
+ * by hand instead of casting through the host's `struct stat` because
+ * stat's layout is host-defined while the wire layout is platform-
+ * agnostic (and the C library on the *guest* may not even have
+ * sys/stat.h). */
+static void le_pack_u32(uint8_t *p, uint32_t v) {
+  p[0] = (uint8_t)v;
+  p[1] = (uint8_t)(v >> 8);
+  p[2] = (uint8_t)(v >> 16);
+  p[3] = (uint8_t)(v >> 24);
+}
+
+static void le_pack_u64(uint8_t *p, uint64_t v) {
+  le_pack_u32(p, (uint32_t)v);
+  le_pack_u32(p + 4, (uint32_t)((v >> 16) >> 16));
+}
+
+/* Pack a host struct stat into the 48-byte little-endian wire layout
+ *   ino[8] mode[4] nlink[4] size[8] mtime[8] atime[8] ctime[8]
+ * defined in include/shared/zbc_protocol.h. Host stat field widths
+ * vary by platform, so cast to fixed widths before packing. */
+static void zbc_ansi_pack_stat(const struct stat *st, void *stat_buf) {
+  uint8_t *out = (uint8_t *)stat_buf;
+  le_pack_u64(out + 0, (uint64_t)st->st_ino);
+  le_pack_u32(out + 8, (uint32_t)st->st_mode);
+  le_pack_u32(out + 12, (uint32_t)st->st_nlink);
+  le_pack_u64(out + 16, (uint64_t)st->st_size);
+  le_pack_u64(out + 24, (uint64_t)st->st_mtime);
+  le_pack_u64(out + 32, (uint64_t)st->st_atime);
+  le_pack_u64(out + 40, (uint64_t)st->st_ctime);
+}
+
+int zbc_ansi_stat_path(const char *resolved_path, void *stat_buf) {
+  struct stat st;
+
+  if (stat(resolved_path, &st) != 0) {
+    return -1;
+  }
+  zbc_ansi_pack_stat(&st, stat_buf);
+  return 0;
+}
+
+int zbc_ansi_fstat_fd(int fd, void *stat_buf) {
+  struct stat st;
+
+  if (fstat(fd, &st) != 0) {
+    return -1;
+  }
+  zbc_ansi_pack_stat(&st, stat_buf);
+  return 0;
+}
+
+int zbc_ansi_mkdir_path(const char *resolved_path, int mode) {
+#ifdef _WIN32
+  (void)mode;
+  return _mkdir(resolved_path);
+#else
+  return mkdir(resolved_path, (mode_t)mode);
+#endif
+}
+
+int zbc_ansi_rmdir_path(const char *resolved_path) {
+#ifdef _WIN32
+  return _rmdir(resolved_path);
+#else
+  return rmdir(resolved_path);
+#endif
+}
+
+int zbc_ansi_ftruncate_fd(int fd, uint64_t length) {
+#ifdef _WIN32
+  /* _chsize_s wants the OS file handle returned by _fileno, and a
+   * signed __int64 length. */
+  return (_chsize_s(fd, (__int64)length) == 0) ? 0 : -1;
+#else
+  return ftruncate(fd, (off_t)length);
+#endif
+}
+
+int zbc_ansi_fsync_fd(int fd) {
+#ifdef _WIN32
+  return _commit(fd);
+#else
+  return fsync(fd);
+#endif
+}
+
+int zbc_ansi_link_paths(const char *old_path, const char *new_path) {
+#ifdef _WIN32
+  (void)old_path;
+  (void)new_path;
+  errno = ENOSYS;
+  return -1;
+#else
+  return link(old_path, new_path);
+#endif
+}
+
+int zbc_ansi_symlink_paths(const char *target, const char *linkpath) {
+#ifdef _WIN32
+  (void)target;
+  (void)linkpath;
+  errno = ENOSYS;
+  return -1;
+#else
+  return symlink(target, linkpath);
+#endif
+}
+
+int zbc_ansi_readlink_path(const char *path, void *buf, size_t buf_size) {
+#ifdef _WIN32
+  (void)path;
+  (void)buf;
+  (void)buf_size;
+  errno = ENOSYS;
+  return -1;
+#else
+  ssize_t n = readlink(path, (char *)buf, buf_size);
+  if (n < 0) {
+    return -1;
+  }
+  return (int)n;
+#endif
+}
+
+int zbc_ansi_lstat_path(const char *resolved_path, void *stat_buf) {
+  struct stat st;
+#ifdef _WIN32
+  /* Windows has no lstat(); regular stat() is the closest approximation
+   * and is correct for files that aren't NTFS reparse points. */
+  if (stat(resolved_path, &st) != 0) {
+    return -1;
+  }
+#else
+  if (lstat(resolved_path, &st) != 0) {
+    return -1;
+  }
+#endif
+  zbc_ansi_pack_stat(&st, stat_buf);
+  return 0;
+}
+
+int zbc_ansi_readdir_one(void *dir_ptr, void *buf, size_t buf_size) {
+#ifdef _WIN32
+  (void)dir_ptr;
+  (void)buf;
+  (void)buf_size;
+  errno = ENOSYS;
+  return -1;
+#else
+  DIR *dir = (DIR *)dir_ptr;
+  struct dirent *de;
+  uint8_t *out = (uint8_t *)buf;
+  size_t name_len;
+  size_t need;
+
+  if (!dir) {
+    return -1;
+  }
+
+  errno = 0;
+  de = readdir(dir);
+  if (!de) {
+    return errno == 0 ? 0 : -1; /* 0 = clean EOD; -1 = real error */
+  }
+
+  name_len = strlen(de->d_name);
+  if (name_len > 255) {
+    return -1; /* name field is uint8 in the wire layout */
+  }
+  need = SH_DIRENT_HDR_SIZE + name_len + 1;
+  if (buf_size < need) {
+    return -1;
+  }
+
+  le_pack_u64(out + 0, (uint64_t)de->d_ino);
+  out[8] = (uint8_t)de->d_type;
+  out[9] = (uint8_t)name_len;
+  memcpy(out + 10, de->d_name, name_len + 1);
+
+  return (int)need;
+#endif
 }

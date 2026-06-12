@@ -11,6 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifndef _WIN32
+#include <dirent.h>
+#endif
 
 /*========================================================================
  * FD State Helpers
@@ -350,6 +353,11 @@ static int ansi_insecure_readc(void *ctx) {
   return zbc_ansi_readc();
 }
 
+static int ansi_insecure_readc_poll(void *ctx) {
+  (void)ctx;
+  return zbc_ansi_readc_poll();
+}
+
 static int ansi_insecure_iserror(void *ctx, int status) {
   (void)ctx;
   return zbc_ansi_iserror(status);
@@ -460,6 +468,326 @@ static int ansi_insecure_timer_config(void *ctx, unsigned int rate_hz) {
   return 0;
 }
 
+static int ansi_insecure_stat(void *ctx, const char *path, size_t path_len,
+                              void *stat_buf) {
+  zbc_ansi_insecure_state_t *state = (zbc_ansi_insecure_state_t *)ctx;
+  int rc;
+
+  if (!state || !state->initialized) {
+    return -1;
+  }
+  if (path_len >= sizeof(state->path_buf)) {
+    state->last_errno = ENAMETOOLONG;
+    return -1;
+  }
+  memcpy(state->path_buf, path, path_len);
+  state->path_buf[path_len] = '\0';
+
+  rc = zbc_ansi_stat_path(state->path_buf, stat_buf);
+  if (rc != 0) {
+    state->last_errno = errno;
+  }
+  return rc;
+}
+
+static int ansi_insecure_opendir(void *ctx, const char *path, size_t path_len) {
+  zbc_ansi_insecure_state_t *state = (zbc_ansi_insecure_state_t *)ctx;
+#ifdef _WIN32
+  (void)path;
+  (void)path_len;
+  if (!state || !state->initialized) {
+    return -1;
+  }
+  state->last_errno = ENOSYS;
+  return -1;
+#else
+  DIR *d;
+  int slot;
+
+  if (!state || !state->initialized) {
+    return -1;
+  }
+  if (path_len >= sizeof(state->path_buf)) {
+    state->last_errno = ENAMETOOLONG;
+    return -1;
+  }
+  memcpy(state->path_buf, path, path_len);
+  state->path_buf[path_len] = '\0';
+
+  for (slot = 0; slot < ZBC_ANSI_MAX_DIRS; slot++) {
+    if (state->dirs[slot] == NULL) {
+      break;
+    }
+  }
+  if (slot == ZBC_ANSI_MAX_DIRS) {
+    state->last_errno = EMFILE;
+    return -1;
+  }
+
+  d = opendir(state->path_buf);
+  if (!d) {
+    state->last_errno = errno;
+    return -1;
+  }
+  state->dirs[slot] = d;
+  return ZBC_ANSI_FIRST_DIR_HANDLE + slot;
+#endif
+}
+
+static int ansi_insecure_readdir(void *ctx, int handle, void *buf,
+                                 size_t buf_size) {
+  zbc_ansi_insecure_state_t *state = (zbc_ansi_insecure_state_t *)ctx;
+  int slot = handle - ZBC_ANSI_FIRST_DIR_HANDLE;
+  int rc;
+
+  if (!state || !state->initialized) {
+    return -1;
+  }
+  if (slot < 0 || slot >= ZBC_ANSI_MAX_DIRS || state->dirs[slot] == NULL) {
+    state->last_errno = EBADF;
+    return -1;
+  }
+
+  rc = zbc_ansi_readdir_one(state->dirs[slot], buf, buf_size);
+  if (rc < 0) {
+    state->last_errno = errno != 0 ? errno : EINVAL;
+  }
+  return rc;
+}
+
+static int ansi_insecure_closedir(void *ctx, int handle) {
+  zbc_ansi_insecure_state_t *state = (zbc_ansi_insecure_state_t *)ctx;
+#ifdef _WIN32
+  (void)handle;
+  if (!state || !state->initialized) {
+    return -1;
+  }
+  state->last_errno = ENOSYS;
+  return -1;
+#else
+  int slot = handle - ZBC_ANSI_FIRST_DIR_HANDLE;
+  int rc;
+
+  if (!state || !state->initialized) {
+    return -1;
+  }
+  if (slot < 0 || slot >= ZBC_ANSI_MAX_DIRS || state->dirs[slot] == NULL) {
+    state->last_errno = EBADF;
+    return -1;
+  }
+
+  rc = closedir((DIR *)state->dirs[slot]);
+  state->dirs[slot] = NULL;
+  if (rc != 0) {
+    state->last_errno = errno;
+    return -1;
+  }
+  return 0;
+#endif
+}
+
+static int ansi_insecure_fstat(void *ctx, int fd, void *stat_buf) {
+  zbc_ansi_insecure_state_t *state = (zbc_ansi_insecure_state_t *)ctx;
+  FILE *fp;
+  int rc;
+
+  if (!state || !state->initialized) {
+    return -1;
+  }
+  fp = insecure_get_file(state, fd);
+  if (!fp) {
+    state->last_errno = EBADF;
+    return -1;
+  }
+  /* Flush stdio first so st_size reflects everything the caller has
+   * written. Without this the underlying fd may still show 0 bytes
+   * while stdio is holding writes in its buffer. */
+  fflush(fp);
+  rc = zbc_ansi_fstat_fd(fileno(fp), stat_buf);
+  if (rc != 0) {
+    state->last_errno = errno;
+  }
+  return rc;
+}
+
+static int ansi_insecure_mkdir(void *ctx, const char *path, size_t path_len,
+                               int mode) {
+  zbc_ansi_insecure_state_t *state = (zbc_ansi_insecure_state_t *)ctx;
+  int rc;
+
+  if (!state || !state->initialized) {
+    return -1;
+  }
+  if (path_len >= sizeof(state->path_buf)) {
+    state->last_errno = ENAMETOOLONG;
+    return -1;
+  }
+  memcpy(state->path_buf, path, path_len);
+  state->path_buf[path_len] = '\0';
+  rc = zbc_ansi_mkdir_path(state->path_buf, mode);
+  if (rc != 0) {
+    state->last_errno = errno;
+  }
+  return rc;
+}
+
+static int ansi_insecure_rmdir(void *ctx, const char *path, size_t path_len) {
+  zbc_ansi_insecure_state_t *state = (zbc_ansi_insecure_state_t *)ctx;
+  int rc;
+
+  if (!state || !state->initialized) {
+    return -1;
+  }
+  if (path_len >= sizeof(state->path_buf)) {
+    state->last_errno = ENAMETOOLONG;
+    return -1;
+  }
+  memcpy(state->path_buf, path, path_len);
+  state->path_buf[path_len] = '\0';
+  rc = zbc_ansi_rmdir_path(state->path_buf);
+  if (rc != 0) {
+    state->last_errno = errno;
+  }
+  return rc;
+}
+
+static int ansi_insecure_ftruncate(void *ctx, int fd, uint64_t length) {
+  zbc_ansi_insecure_state_t *state = (zbc_ansi_insecure_state_t *)ctx;
+  FILE *fp;
+  int rc;
+
+  if (!state || !state->initialized) {
+    return -1;
+  }
+  fp = insecure_get_file(state, fd);
+  if (!fp) {
+    state->last_errno = EBADF;
+    return -1;
+  }
+  /* Flush stdio's buffer so the truncation lines up with what the
+   * caller has written. */
+  fflush(fp);
+  rc = zbc_ansi_ftruncate_fd(fileno(fp), length);
+  if (rc != 0) {
+    state->last_errno = errno;
+  }
+  return rc;
+}
+
+static int ansi_insecure_fsync(void *ctx, int fd) {
+  zbc_ansi_insecure_state_t *state = (zbc_ansi_insecure_state_t *)ctx;
+  FILE *fp;
+  int rc;
+
+  if (!state || !state->initialized) {
+    return -1;
+  }
+  fp = insecure_get_file(state, fd);
+  if (!fp) {
+    state->last_errno = EBADF;
+    return -1;
+  }
+  fflush(fp);
+  rc = zbc_ansi_fsync_fd(fileno(fp));
+  if (rc != 0) {
+    state->last_errno = errno;
+  }
+  return rc;
+}
+
+static int ansi_insecure_link(void *ctx, const char *old_path, size_t old_len,
+                              const char *new_path, size_t new_len) {
+  zbc_ansi_insecure_state_t *state = (zbc_ansi_insecure_state_t *)ctx;
+  /* Stage the new path in path_buf, and the old path in a local copy. */
+  char old_copy[ZBC_ANSI_PATH_BUF_MAX];
+  int rc;
+
+  if (!state || !state->initialized) {
+    return -1;
+  }
+  if (old_len >= sizeof(old_copy) || new_len >= sizeof(state->path_buf)) {
+    state->last_errno = ENAMETOOLONG;
+    return -1;
+  }
+  memcpy(old_copy, old_path, old_len);
+  old_copy[old_len] = '\0';
+  memcpy(state->path_buf, new_path, new_len);
+  state->path_buf[new_len] = '\0';
+  rc = zbc_ansi_link_paths(old_copy, state->path_buf);
+  if (rc != 0) {
+    state->last_errno = errno;
+  }
+  return rc;
+}
+
+static int ansi_insecure_symlink(void *ctx, const char *target,
+                                 size_t target_len, const char *linkpath,
+                                 size_t linkpath_len) {
+  zbc_ansi_insecure_state_t *state = (zbc_ansi_insecure_state_t *)ctx;
+  char target_copy[ZBC_ANSI_PATH_BUF_MAX];
+  int rc;
+
+  if (!state || !state->initialized) {
+    return -1;
+  }
+  if (target_len >= sizeof(target_copy) ||
+      linkpath_len >= sizeof(state->path_buf)) {
+    state->last_errno = ENAMETOOLONG;
+    return -1;
+  }
+  memcpy(target_copy, target, target_len);
+  target_copy[target_len] = '\0';
+  memcpy(state->path_buf, linkpath, linkpath_len);
+  state->path_buf[linkpath_len] = '\0';
+  rc = zbc_ansi_symlink_paths(target_copy, state->path_buf);
+  if (rc != 0) {
+    state->last_errno = errno;
+  }
+  return rc;
+}
+
+static int ansi_insecure_readlink(void *ctx, const char *path, size_t path_len,
+                                  void *buf, size_t buf_size) {
+  zbc_ansi_insecure_state_t *state = (zbc_ansi_insecure_state_t *)ctx;
+  int rc;
+
+  if (!state || !state->initialized) {
+    return -1;
+  }
+  if (path_len >= sizeof(state->path_buf)) {
+    state->last_errno = ENAMETOOLONG;
+    return -1;
+  }
+  memcpy(state->path_buf, path, path_len);
+  state->path_buf[path_len] = '\0';
+  rc = zbc_ansi_readlink_path(state->path_buf, buf, buf_size);
+  if (rc < 0) {
+    state->last_errno = errno;
+  }
+  return rc;
+}
+
+static int ansi_insecure_lstat(void *ctx, const char *path, size_t path_len,
+                               void *stat_buf) {
+  zbc_ansi_insecure_state_t *state = (zbc_ansi_insecure_state_t *)ctx;
+  int rc;
+
+  if (!state || !state->initialized) {
+    return -1;
+  }
+  if (path_len >= sizeof(state->path_buf)) {
+    state->last_errno = ENAMETOOLONG;
+    return -1;
+  }
+  memcpy(state->path_buf, path, path_len);
+  state->path_buf[path_len] = '\0';
+  rc = zbc_ansi_lstat_path(state->path_buf, stat_buf);
+  if (rc != 0) {
+    state->last_errno = errno;
+  }
+  return rc;
+}
+
 /*========================================================================
  * Vtable and Public API
  *========================================================================*/
@@ -476,7 +804,14 @@ static const zbc_backend_t ansi_insecure_backend = {
     ansi_insecure_elapsed,     ansi_insecure_tickfreq,
     ansi_insecure_do_system,   ansi_insecure_get_cmdline,
     ansi_insecure_heapinfo,    ansi_insecure_do_exit,
-    ansi_insecure_get_errno,   ansi_insecure_timer_config};
+    ansi_insecure_get_errno,   ansi_insecure_timer_config,
+    ansi_insecure_stat,        ansi_insecure_opendir,
+    ansi_insecure_readdir,     ansi_insecure_closedir,
+    ansi_insecure_readc_poll,  ansi_insecure_fstat,
+    ansi_insecure_mkdir,       ansi_insecure_rmdir,
+    ansi_insecure_ftruncate,   ansi_insecure_fsync,
+    ansi_insecure_link,        ansi_insecure_symlink,
+    ansi_insecure_readlink,    ansi_insecure_lstat};
 
 const zbc_backend_t *zbc_backend_ansi_insecure(void) {
   return &ansi_insecure_backend;
@@ -516,6 +851,15 @@ void zbc_ansi_insecure_cleanup(zbc_ansi_insecure_state_t *state) {
       state->files[i] = NULL;
     }
   }
+
+#ifndef _WIN32
+  for (i = 0; i < ZBC_ANSI_MAX_DIRS; i++) {
+    if (state->dirs[i] != NULL) {
+      closedir((DIR *)state->dirs[i]);
+      state->dirs[i] = NULL;
+    }
+  }
+#endif
 
   state->initialized = 0;
 }

@@ -79,6 +79,50 @@ typedef uint32_t uintptr_t;
 #define SH_SYS_TIMER_CONFIG   0x32  /* Configure periodic timer interrupt */
 
 /*========================================================================
+ * Linux-extension opcodes (0x80+, avoids ARM semihosting collisions)
+ *========================================================================*/
+
+#define SH_SYS_OPENDIR        0x80  /* Open a directory for enumeration */
+#define SH_SYS_READDIR        0x81  /* Read one directory entry */
+#define SH_SYS_CLOSEDIR       0x82  /* Close a directory handle */
+#define SH_SYS_STAT           0x83  /* Get file metadata by path */
+#define SH_SYS_FSTAT          0x84  /* Get file metadata by fd */
+#define SH_SYS_MKDIR          0x85  /* Create a directory */
+#define SH_SYS_RMDIR          0x86  /* Remove an empty directory */
+#define SH_SYS_FTRUNCATE      0x87  /* Truncate an open file to length */
+#define SH_SYS_FSYNC          0x88  /* Flush file data to storage */
+#define SH_SYS_READC_POLL     0x89  /* Non-blocking console char read */
+#define SH_SYS_LINK           0x8A  /* Create a hard link */
+#define SH_SYS_SYMLINK        0x8B  /* Create a symbolic link */
+#define SH_SYS_READLINK       0x8C  /* Read a symlink's target */
+#define SH_SYS_LSTAT          0x8D  /* stat() that does not follow symlinks */
+
+/** Wire size of the fixed SYS_STAT response buffer (always 48 bytes). */
+#define SH_STAT_BUF_SIZE      48
+
+/**
+ * Wire format of a single SYS_READDIR entry:
+ *   d_ino[8]    - inode number (little-endian)
+ *   d_type[1]   - file type (SH_DT_REG, SH_DT_DIR, ...)
+ *   d_namlen[1] - filename length (NOT including the NUL)
+ *   d_name[d_namlen + 1] - NUL-terminated filename
+ *
+ * Total bytes per entry = 10 + d_namlen + 1.
+ * Buffer the guest passes must accommodate this for any single entry.
+ */
+#define SH_DIRENT_HDR_SIZE    10
+
+/* d_type values matching POSIX dirent.h DT_* constants. */
+#define SH_DT_UNKNOWN  0
+#define SH_DT_FIFO     1
+#define SH_DT_CHR      2
+#define SH_DT_DIR      4
+#define SH_DT_BLK      6
+#define SH_DT_REG      8
+#define SH_DT_LNK      10
+#define SH_DT_SOCK     12
+
+/*========================================================================
  * Open mode flags (ARM semihosting compatible)
  *========================================================================*/
 
@@ -140,22 +184,29 @@ typedef uint32_t uintptr_t;
 #define ZBC_REG_SIGNATURE   0x00  /* 8 bytes, R - ASCII "SEMIHOST" */
 #define ZBC_REG_RIFF_PTR    0x08  /* 16 bytes, RW - pointer to RIFF buffer */
 #define ZBC_REG_DOORBELL    0x18  /* 1 byte, W - write to trigger request */
-#define ZBC_REG_STATUS      0x19  /* 1 byte, RW - interrupt pending (write 0 to clear) */
+#define ZBC_REG_STATUS      0x19  /* 1 byte, RW - status/interrupt bitmask (write 0 to ack) */
+#define ZBC_REG_ERROR_CODE  0x1A  /* 2 bytes, R - last protocol error code (LE, 0=none) */
 #define ZBC_REG_SIZE        0x20  /* Total register space: 32 bytes */
 
 /*========================================================================
- * STATUS register values (at offset 0x19)
+ * STATUS register bits (at offset 0x19)
  *
- * The STATUS register indicates pending interrupt sources:
- *   0 = No interrupt pending
- *   1 = Timer tick occurred (from SYS_TIMER_CONFIG)
- *   2+ = Reserved for future interrupt sources
+ * The STATUS register is a bitmask of latched conditions:
+ *   bit 0 (0x01) TIMER          - timer tick occurred (from SYS_TIMER_CONFIG);
+ *                                  asserts IRQ. STATUS==1 keeps its legacy
+ *                                  "timer tick" meaning for existing guests.
+ *   bit 1 (0x02) RESPONSE_READY - request processed, response in RETN/ERRO.
+ *   bit 2 (0x04) PROTO_ERROR    - request failed and no ERRO chunk could be
+ *                                  written; code is in ERROR_CODE (0x1A).
+ *   bits 3-7                    - reserved.
  *
- * Write 0 to STATUS to acknowledge the interrupt and deassert IRQ.
+ * Write 0 to STATUS to acknowledge (clear all bits) and deassert IRQ.
  *========================================================================*/
 
-#define ZBC_STATUS_NONE   0  /* No interrupt pending */
-#define ZBC_STATUS_TIMER  1  /* Timer tick occurred */
+#define ZBC_STATUS_NONE            0     /* No condition pending */
+#define ZBC_STATUS_TIMER           0x01  /* Timer tick occurred (asserts IRQ) */
+#define ZBC_STATUS_RESPONSE_READY  0x02  /* Response available in RETN/ERRO */
+#define ZBC_STATUS_PROTO_ERROR     0x04  /* Failure; see ERROR_CODE register */
 
 /*========================================================================
  * Signature bytes
@@ -195,16 +246,21 @@ typedef uint32_t uintptr_t;
 #define ZBC_ERR_TIMEOUT           (-12)  /* Operation timed out */
 #define ZBC_ERR_INVALID_ARG       (-13)  /* Invalid argument */
 #define ZBC_ERR_PARSE_ERROR       (-14)  /* Malformed RIFF data */
+#define ZBC_ERR_AGAIN             (-15)  /* Not ready yet; poll again */
 
 /*========================================================================
- * Protocol error codes (in ERRO chunk)
+ * Protocol error codes (in ERRO chunk, or in the ERROR_CODE register
+ * when no ERRO chunk could be written)
  *========================================================================*/
 
-#define ZBC_PROTO_ERR_INVALID_CHUNK   0x01
-#define ZBC_PROTO_ERR_MALFORMED_RIFF  0x02
-#define ZBC_PROTO_ERR_MISSING_CNFG    0x03
-#define ZBC_PROTO_ERR_UNSUPPORTED_OP  0x04
-#define ZBC_PROTO_ERR_INVALID_PARAMS  0x05
+#define ZBC_PROTO_ERR_INVALID_CHUNK   0x01  /* Bad chunk structure/nesting */
+#define ZBC_PROTO_ERR_MALFORMED_RIFF  0x02  /* Bad RIFF signature/form/size */
+#define ZBC_PROTO_ERR_MISSING_CNFG    0x03  /* CNFG required but not sent */
+#define ZBC_PROTO_ERR_UNSUPPORTED_OP  0x04  /* Opcode not implemented */
+#define ZBC_PROTO_ERR_INVALID_PARAMS  0x05  /* Wrong number of PARM/DATA */
+#define ZBC_PROTO_ERR_MISSING_RETN    0x06  /* Guest did not pre-allocate RETN */
+#define ZBC_PROTO_ERR_MISSING_ERRO    0x07  /* Guest did not pre-allocate ERRO */
+#define ZBC_PROTO_ERR_RETN_TOO_SMALL  0x08  /* RETN cannot hold the response */
 
 /*========================================================================
  * RIFF chunk structures

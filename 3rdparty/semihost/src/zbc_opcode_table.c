@@ -440,6 +440,254 @@ static const zbc_opcode_entry_t zbc_opcode_table[] = {
      0,
      0},
 
+    /*
+     * SH_SYS_OPENDIR (0x80) -- Linux extension
+     * Guest args: {path_ptr, path_len}
+     * Request: DATA(path, len=args[1]), PARM(path_len)
+     * Response: int (dir handle >= 0, or -1)
+     */
+    {SH_SYS_OPENDIR,
+     2,
+     {{ZBC_CHUNK_DATA_PTR, 0, 1},  /* DATA: ptr=args[0], len=args[1] */
+      {ZBC_CHUNK_PARM_UINT, 1, 0}, /* PARM: path_len */
+      {ZBC_CHUNK_NONE, 0, 0},
+      {ZBC_CHUNK_NONE, 0, 0}},
+     ZBC_RESP_INT,
+     0,
+     0},
+
+    /*
+     * SH_SYS_READDIR (0x81) -- Linux extension
+     * Guest args: {dir_handle, buf_ptr, buf_size}
+     * Request: PARM(dir_handle), PARM(buf_size)
+     * Response: int (bytes written, 0 = end of directory, -1 = error),
+     * DATA copied to args[1] with max len from args[2].
+     */
+    {
+        SH_SYS_READDIR,
+        3,
+        {{ZBC_CHUNK_PARM_INT, 0, 0},  /* dir_handle */
+         {ZBC_CHUNK_PARM_UINT, 2, 0}, /* buf_size hint */
+         {ZBC_CHUNK_NONE, 0, 0},
+         {ZBC_CHUNK_NONE, 0, 0}},
+        ZBC_RESP_DATA,
+        1, /* copy DATA to args[1] */
+        2  /* max len from args[2] */
+    },
+
+    /*
+     * SH_SYS_CLOSEDIR (0x82) -- Linux extension
+     * Guest args: {dir_handle}
+     * Request: PARM(dir_handle)
+     * Response: int (0 or -1)
+     */
+    {SH_SYS_CLOSEDIR,
+     1,
+     {{ZBC_CHUNK_PARM_INT, 0, 0},
+      {ZBC_CHUNK_NONE, 0, 0},
+      {ZBC_CHUNK_NONE, 0, 0},
+      {ZBC_CHUNK_NONE, 0, 0}},
+     ZBC_RESP_INT,
+     0,
+     0},
+
+    /*
+     * SH_SYS_STAT (0x83) -- Linux extension
+     * Guest args: {path_ptr, path_len, stat_buf_ptr, 48}
+     * Request: DATA(path, len=args[1]), PARM(path_len)
+     * Response: int (0 or -1), 48-byte stat struct in DATA, copied to
+     * args[2] with max len from args[3] (must be SH_STAT_BUF_SIZE=48).
+     */
+    {
+        SH_SYS_STAT,
+        4,
+        {{ZBC_CHUNK_DATA_PTR, 0, 1},  /* DATA: ptr=args[0], len=args[1] */
+         {ZBC_CHUNK_PARM_UINT, 1, 0}, /* PARM: path_len */
+         {ZBC_CHUNK_NONE, 0, 0},
+         {ZBC_CHUNK_NONE, 0, 0}},
+        ZBC_RESP_DATA,
+        2, /* copy DATA to args[2] (stat buffer) */
+        3  /* max len from args[3], must equal SH_STAT_BUF_SIZE */
+    },
+
+    /*
+     * SH_SYS_FSTAT (0x84) -- Linux extension
+     * Guest args: {fd, stat_buf_ptr, 48}
+     * Request: PARM(fd)
+     * Response: int (0 or -1), 48-byte stat struct in DATA, copied to
+     * args[1] with max len from args[2] (must be SH_STAT_BUF_SIZE=48).
+     */
+    {
+        SH_SYS_FSTAT,
+        3,
+        {{ZBC_CHUNK_PARM_INT, 0, 0},  /* PARM: fd */
+         {ZBC_CHUNK_NONE, 0, 0},
+         {ZBC_CHUNK_NONE, 0, 0},
+         {ZBC_CHUNK_NONE, 0, 0}},
+        ZBC_RESP_DATA,
+        1, /* copy DATA to args[1] (stat buffer) */
+        2  /* max len from args[2], must equal SH_STAT_BUF_SIZE */
+    },
+
+    /*
+     * SH_SYS_MKDIR (0x85) -- Linux extension
+     * Guest args: {path_ptr, path_len, mode}
+     * Request: DATA(path, len=args[1]), PARM(path_len), PARM(mode)
+     * Response: int (0 or -1)
+     */
+    {SH_SYS_MKDIR,
+     3,
+     {{ZBC_CHUNK_DATA_PTR, 0, 1},  /* DATA: path */
+      {ZBC_CHUNK_PARM_UINT, 1, 0}, /* PARM: path_len */
+      {ZBC_CHUNK_PARM_UINT, 2, 0}, /* PARM: mode */
+      {ZBC_CHUNK_NONE, 0, 0}},
+     ZBC_RESP_INT,
+     0,
+     0},
+
+    /*
+     * SH_SYS_RMDIR (0x86) -- Linux extension
+     * Guest args: {path_ptr, path_len}
+     * Request: DATA(path, len=args[1]), PARM(path_len)
+     * Response: int (0 or -1)
+     */
+    {SH_SYS_RMDIR,
+     2,
+     {{ZBC_CHUNK_DATA_PTR, 0, 1},  /* DATA: path */
+      {ZBC_CHUNK_PARM_UINT, 1, 0}, /* PARM: path_len */
+      {ZBC_CHUNK_NONE, 0, 0},
+      {ZBC_CHUNK_NONE, 0, 0}},
+     ZBC_RESP_INT,
+     0,
+     0},
+
+    /*
+     * SH_SYS_FTRUNCATE (0x87) -- Linux extension
+     * Guest args: {fd, length_ptr, 8}
+     * Request: PARM(fd), DATA(length, 8 bytes little-endian, len=args[2])
+     * Response: int (0 or -1)
+     *
+     * The 8-byte DATA chunk carries the 64-bit length so a 16- or 32-bit
+     * guest can still truncate to file sizes beyond its own pointer
+     * width.
+     */
+    {SH_SYS_FTRUNCATE,
+     3,
+     {{ZBC_CHUNK_PARM_INT, 0, 0},  /* PARM: fd */
+      {ZBC_CHUNK_DATA_PTR, 1, 2},  /* DATA: 8-byte length */
+      {ZBC_CHUNK_NONE, 0, 0},
+      {ZBC_CHUNK_NONE, 0, 0}},
+     ZBC_RESP_INT,
+     0,
+     0},
+
+    /*
+     * SH_SYS_FSYNC (0x88) -- Linux extension
+     * Guest args: {fd}
+     * Request: PARM(fd)
+     * Response: int (0 or -1)
+     */
+    {SH_SYS_FSYNC,
+     1,
+     {{ZBC_CHUNK_PARM_INT, 0, 0},  /* PARM: fd */
+      {ZBC_CHUNK_NONE, 0, 0},
+      {ZBC_CHUNK_NONE, 0, 0},
+      {ZBC_CHUNK_NONE, 0, 0}},
+     ZBC_RESP_INT,
+     0,
+     0},
+
+    /*
+     * SH_SYS_READC_POLL (0x89) -- Linux extension
+     * Guest args: none
+     * Request: (no params)
+     * Response: int (0-255 char on success, -1 if no character available;
+     * the -1 is not an error, just an empty poll)
+     */
+    {SH_SYS_READC_POLL,
+     0,
+     {{ZBC_CHUNK_NONE, 0, 0},
+      {ZBC_CHUNK_NONE, 0, 0},
+      {ZBC_CHUNK_NONE, 0, 0},
+      {ZBC_CHUNK_NONE, 0, 0}},
+     ZBC_RESP_INT,
+     0,
+     0},
+
+    /*
+     * SH_SYS_LINK (0x8A) -- Linux extension (optional)
+     * Guest args: {old_ptr, old_len, new_ptr, new_len}
+     * Request: DATA(old), PARM(old_len), DATA(new), PARM(new_len)
+     * Response: int (0 or -1). Same wire shape as SH_SYS_RENAME.
+     */
+    {SH_SYS_LINK,
+     4,
+     {{ZBC_CHUNK_DATA_PTR, 0, 1},
+      {ZBC_CHUNK_PARM_UINT, 1, 0},
+      {ZBC_CHUNK_DATA_PTR, 2, 3},
+      {ZBC_CHUNK_PARM_UINT, 3, 0}},
+     ZBC_RESP_INT,
+     0,
+     0},
+
+    /*
+     * SH_SYS_SYMLINK (0x8B) -- Linux extension (optional)
+     * Guest args: {target_ptr, target_len, linkpath_ptr, linkpath_len}
+     * Request: DATA(target), PARM(target_len), DATA(linkpath), PARM(linkpath_len)
+     * Response: int (0 or -1).
+     */
+    {SH_SYS_SYMLINK,
+     4,
+     {{ZBC_CHUNK_DATA_PTR, 0, 1},
+      {ZBC_CHUNK_PARM_UINT, 1, 0},
+      {ZBC_CHUNK_DATA_PTR, 2, 3},
+      {ZBC_CHUNK_PARM_UINT, 3, 0}},
+     ZBC_RESP_INT,
+     0,
+     0},
+
+    /*
+     * SH_SYS_READLINK (0x8C) -- Linux extension (optional)
+     * Guest args: {path_ptr, path_len, buf_ptr, buf_size}
+     * Request: DATA(path), PARM(path_len), PARM(buf_size)
+     * Response: int (bytes written to target buf; -1 on error). The
+     * symlink target bytes are returned as DATA and copied to args[2]
+     * with max length args[3]. The bytes are NOT NUL-terminated; the
+     * caller relies on the int result for the length, matching POSIX
+     * readlink(2).
+     */
+    {SH_SYS_READLINK,
+     4,
+     {{ZBC_CHUNK_DATA_PTR, 0, 1},
+      {ZBC_CHUNK_PARM_UINT, 1, 0},
+      {ZBC_CHUNK_PARM_UINT, 3, 0},
+      {ZBC_CHUNK_NONE, 0, 0}},
+     ZBC_RESP_DATA,
+     2, /* copy DATA to args[2] */
+     3  /* max len from args[3] */
+    },
+
+    /*
+     * SH_SYS_LSTAT (0x8D) -- Linux extension (optional)
+     * Guest args: {path_ptr, path_len, stat_buf_ptr, 48}
+     * Request: DATA(path), PARM(path_len)
+     * Response: int (0 or -1), 48-byte stat struct in DATA copied to
+     * args[2]. Wire-identical to SH_SYS_STAT; the difference is that
+     * lstat() does not traverse a terminal symlink and reports the
+     * link's own metadata.
+     */
+    {
+        SH_SYS_LSTAT,
+        4,
+        {{ZBC_CHUNK_DATA_PTR, 0, 1},
+         {ZBC_CHUNK_PARM_UINT, 1, 0},
+         {ZBC_CHUNK_NONE, 0, 0},
+         {ZBC_CHUNK_NONE, 0, 0}},
+        ZBC_RESP_DATA,
+        2,
+        3
+    },
+
     /* End marker */
     {0, 0, {{ZBC_CHUNK_NONE, 0, 0}}, ZBC_RESP_INT, 0, 0}};
 

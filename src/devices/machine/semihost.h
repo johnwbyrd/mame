@@ -90,7 +90,7 @@ class semihost_device : public device_t {
 	                            void *ctx);
 	static void on_exit_callback(void *ctx, unsigned int reason,
 	                             unsigned int subcode);
-	static void on_timer_config_callback(void *ctx, unsigned int rate_hz);
+	static int on_timer_config_callback(void *ctx, unsigned int rate_hz);
 };
 
 DECLARE_DEVICE_TYPE(SEMIHOST, semihost_device)
