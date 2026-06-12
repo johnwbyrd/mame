@@ -74,6 +74,8 @@ function createMAMEProjects(_target, _subtarget, _name)
 		MAME_DIR .. "src/lib",
 		MAME_DIR .. "src/lib/util",
 		MAME_DIR .. "3rdparty",
+		MAME_DIR .. "3rdparty/zbc/include/cpp",
+		MAME_DIR .. "3rdparty/zbc/include/shared",
 		GEN_DIR  .. "mame/layout",
 	}
 

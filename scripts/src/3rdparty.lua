@@ -2083,30 +2083,28 @@ end
 
 
 --------------------------------------------------
--- semihost library (ZBC semihosting support)
+-- ZBC semihosting library (C++ host)
 --------------------------------------------------
 
-project "semihost"
+project "zbc"
 	uuid "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 	kind "StaticLib"
 
-	defines {
-		"ZBC_HOST",
-	}
-
 	includedirs {
-		MAME_DIR .. "3rdparty/semihost/include",
-		MAME_DIR .. "3rdparty/semihost/src",
+		MAME_DIR .. "3rdparty/zbc/include/cpp",
+		MAME_DIR .. "3rdparty/zbc/include/shared",
+		MAME_DIR .. "3rdparty/zbc/include/c",
 	}
 
 	configuration { }
 
 	files {
-		MAME_DIR .. "3rdparty/semihost/src/zbc_host.c",
-		MAME_DIR .. "3rdparty/semihost/src/zbc_opcode_table.c",
-		MAME_DIR .. "3rdparty/semihost/src/zbc_riff.c",
-		MAME_DIR .. "3rdparty/semihost/src/zbc_backend_dummy.c",
-		MAME_DIR .. "3rdparty/semihost/src/zbc_ansi_common.c",
-		MAME_DIR .. "3rdparty/semihost/src/zbc_ansi_secure.c",
-		MAME_DIR .. "3rdparty/semihost/src/zbc_ansi_insecure.c",
+		MAME_DIR .. "3rdparty/zbc/src/cpp/Backend.cpp",
+		MAME_DIR .. "3rdparty/zbc/src/cpp/Device.cpp",
+		MAME_DIR .. "3rdparty/zbc/src/cpp/FileDescTable.cpp",
+		MAME_DIR .. "3rdparty/zbc/src/cpp/PathValidator.cpp",
+		MAME_DIR .. "3rdparty/zbc/src/cpp/Policy.cpp",
+		MAME_DIR .. "3rdparty/zbc/src/cpp/RiffCodec.cpp",
+		MAME_DIR .. "3rdparty/zbc/src/shared/zbc_opcode_table.c",
+		MAME_DIR .. "3rdparty/zbc/src/shared/zbc_riff.c",
 	}

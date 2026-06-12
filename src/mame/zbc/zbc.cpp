@@ -8,7 +8,7 @@
     Each ZBC includes:
     - RAM (size determined by CPU address width)
     - MC6847 VDG text display (32x16)
-    - Semihosting device for file I/O, console, and time services
+    - ZBC device for file I/O, console, and time services
     - ELF loader for loading programs
 
     Design Philosophy:
@@ -74,7 +74,7 @@
 
 #include "imagedev/elfload.h"
 #include "m6847drv.h"
-#include "machine/semihost.h"
+#include "machine/zbc.h"
 #include "video/mc6847.h"
 
 namespace {
@@ -99,7 +99,7 @@ class zbc_state : public driver_device {
   public:
 	zbc_state(const machine_config &mconfig, device_type type, const char *tag)
 	    : driver_device(mconfig, type, tag), m_maincpu(*this, "maincpu"),
-	      m_vdg(*this, "vdg"), m_semihost(*this, "semihost"),
+	      m_vdg(*this, "vdg"), m_zbc(*this, "zbc"),
 	      m_elfload(*this, "elfload"),
 	      m_videoram(*this, "videoram", 0x200, ENDIANNESS_LITTLE) {}
 
@@ -114,7 +114,7 @@ class zbc_state : public driver_device {
 	// Devices
 	required_device<cpu_device> m_maincpu;
 	required_device<mc6847_base_device> m_vdg;
-	required_device<semihost_device> m_semihost;
+	required_device<zbc_device> m_zbc;
 	optional_device<elfload_image_device> m_elfload;
 
 	// Memory - byte-granular VRAM access for MC6847
@@ -122,7 +122,7 @@ class zbc_state : public driver_device {
 	static constexpr zbc_size_t VRAM_SIZE = 512; // 32x16 text mode
 	static constexpr zbc_size_t VRAM_MASK =
 	    VRAM_SIZE - 1; // 0x1FF - mask for VRAM indexing
-	static constexpr zbc_size_t SEMIHOST_SIZE = 32; // Semihost device registers
+	static constexpr zbc_size_t ZBC_DEVICE_SIZE = 32; // ZBC device registers
 
 
 	// Console display driver
@@ -149,12 +149,12 @@ class zbc_state : public driver_device {
 		return reserved_start - VRAM_SIZE;
 	}
 
-	// Calculate semihost device address - placed just before VRAM.
+	// Calculate ZBC device address - placed just before VRAM.
 	// Device registers are 32 bytes, placed immediately before video RAM.
 	// MUST be called only when address space exists (machine_start(), not
 	// mem_map()).
-	zbc_addr_t get_semihost_addr() const {
-		return get_vram_addr() - SEMIHOST_SIZE;
+	zbc_addr_t get_zbc_addr() const {
+		return get_vram_addr() - ZBC_DEVICE_SIZE;
 	}
 
 	// Format memory size in human-readable units (KB, MB, GB)
@@ -252,16 +252,16 @@ void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::init_screen() {
 
 	// Display memory configuration
 	char addr_buf[64];
-	zbc_addr_t semihost_addr = get_semihost_addr();
+	zbc_addr_t zbc_addr = get_zbc_addr();
 	zbc_addr_t vram_addr = get_vram_addr();
 
 	snprintf(addr_buf, sizeof(addr_buf), "RAM: 0x0 - 0x%llX",
-	         (unsigned long long)(semihost_addr - 1));
+	         (unsigned long long)(zbc_addr - 1));
 	m_console.center_line(addr_buf);
 
-	snprintf(addr_buf, sizeof(addr_buf), "Semihost: 0x%llX-0x%llX",
-	         (unsigned long long)semihost_addr,
-	         (unsigned long long)(semihost_addr + SEMIHOST_SIZE - 1));
+	snprintf(addr_buf, sizeof(addr_buf), "ZBC: 0x%llX-0x%llX",
+	         (unsigned long long)zbc_addr,
+	         (unsigned long long)(zbc_addr + ZBC_DEVICE_SIZE - 1));
 	m_console.center_line(addr_buf);
 
 	snprintf(addr_buf, sizeof(addr_buf), "Video RAM: 0x%llX-0x%llX",
@@ -272,7 +272,7 @@ void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::init_screen() {
 	m_console.center_line("");
 
 	// Display welcome message with RAM size
-	std::string ram_size_str = format_ram_size(semihost_addr);
+	std::string ram_size_str = format_ram_size(zbc_addr);
 	std::string intro = "This system has " + ram_size_str +
 	                    " of RAM and a MC6847 video display. "
 	                    "Load and execute an ELF executable in MAME "
@@ -321,7 +321,7 @@ void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::machine_start() {
 
 	// === Validate address space is large enough ===
 	const zbc_size_t min_program = 2048; // Minimum program space
-	const zbc_size_t min_required = min_program + SEMIHOST_SIZE + VRAM_SIZE;
+	const zbc_size_t min_required = min_program + ZBC_DEVICE_SIZE + VRAM_SIZE;
 
 	if (addr_space_size < min_required) {
 		ZBC_ERROR("ZBC machine_start: CPU '%s' address space too small\n",
@@ -333,18 +333,18 @@ void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::machine_start() {
 		return;
 	}
 
-	// === Calculate semihost device address ===
-	const zbc_addr_t semihost_addr = get_semihost_addr();
-	const zbc_addr_t semihost_end = semihost_addr + SEMIHOST_SIZE - 1;
+	// === Calculate ZBC device address ===
+	const zbc_addr_t zbc_addr = get_zbc_addr();
+	const zbc_addr_t zbc_end = zbc_addr + ZBC_DEVICE_SIZE - 1;
 
-	// === Install semihost device registers ===
-	ZBC_LOG_MEM("ZBC: Installing semihost device registers\n");
-	ZBC_LOG_MEM("  Range: 0x%llX - 0x%llX\n", (unsigned long long)semihost_addr,
-	            (unsigned long long)semihost_end);
+	// === Install ZBC device registers ===
+	ZBC_LOG_MEM("ZBC: Installing device registers\n");
+	ZBC_LOG_MEM("  Range: 0x%llX - 0x%llX\n", (unsigned long long)zbc_addr,
+	            (unsigned long long)zbc_end);
 	space.install_readwrite_handler(
-	    semihost_addr, semihost_end,
-	    read8sm_delegate(*m_semihost, FUNC(semihost_device::read)),
-	    write8sm_delegate(*m_semihost, FUNC(semihost_device::write)));
+	    zbc_addr, zbc_end,
+	    read8sm_delegate(*m_zbc, FUNC(zbc_device::read)),
+	    write8sm_delegate(*m_zbc, FUNC(zbc_device::write)));
 
 	// === Install VRAM over the generic RAM from mem_map() ===
 	// CRITICAL: Must use install_ram()/install_rom() to force byte-granular
@@ -366,11 +366,11 @@ void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::machine_start() {
 	ZBC_LOG_MEM("\nZBC Complete Memory Map (%d-bit %s):\n", addr_bits,
 	            m_maincpu->name());
 	ZBC_LOG_MEM("  0x%llX - 0x%llX: RAM (0x%llX bytes)\n",
-	            (unsigned long long)0, (unsigned long long)(semihost_addr - 1),
-	            (unsigned long long)semihost_addr);
-	ZBC_LOG_MEM("  0x%llX - 0x%llX: Semihost device (%d bytes)\n",
-	            (unsigned long long)semihost_addr,
-	            (unsigned long long)semihost_end, SEMIHOST_SIZE);
+	            (unsigned long long)0, (unsigned long long)(zbc_addr - 1),
+	            (unsigned long long)zbc_addr);
+	ZBC_LOG_MEM("  0x%llX - 0x%llX: ZBC device (%d bytes)\n",
+	            (unsigned long long)zbc_addr,
+	            (unsigned long long)zbc_end, ZBC_DEVICE_SIZE);
 	ZBC_LOG_MEM("  0x%llX - 0x%llX: Video RAM (%d bytes)\n",
 	            (unsigned long long)vram_addr, (unsigned long long)vram_end,
 	            VRAM_SIZE);
@@ -382,7 +382,7 @@ void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::machine_start() {
 	}
 	ZBC_LOG_MEM(
 	    "  Total RAM: 0x%llX bytes\n\n",
-	    (unsigned long long)(addr_space_size - SEMIHOST_SIZE - VRAM_SIZE));
+	    (unsigned long long)(addr_space_size - ZBC_DEVICE_SIZE - VRAM_SIZE));
 
 	// Initialize console with VRAM pointer
 	m_console.set_vram_base(m_videoram.target());
@@ -406,13 +406,14 @@ void zbc_state<CPU_TYPE, CPU_SPEED, VRAM_ADDR>::zbc(
 	m_vdg->set_screen("screen");
 	m_vdg->input_callback().set(FUNC(zbc_state::vdg_videoram_r));
 
-	// Semihosting device - provides file I/O, console, time services, and
-	// timer interrupts. Guest programs configure timer via SYS_TIMER_CONFIG
-	// syscall, acknowledge interrupts by writing 0 to STATUS register.
-	SEMIHOST(config, m_semihost, 0);
-	m_semihost->set_cpu_tag("maincpu");
+	// ZBC device - provides file I/O, console, time services, and timer
+	// interrupts via the semihosting protocol. Guest programs configure
+	// the timer via SYS_TIMER_CONFIG and acknowledge interrupts by writing
+	// 0 to the STATUS register.
+	ZBC(config, m_zbc, 0);
+	m_zbc->set_cpu_tag("maincpu");
 	// Timer interrupt on IRQ0 - guest configures rate via SYS_TIMER_CONFIG
-	m_semihost->irq_callback().set_inputline(m_maincpu, INPUT_LINE_IRQ0);
+	m_zbc->irq_callback().set_inputline(m_maincpu, INPUT_LINE_IRQ0);
 
 	ELFLOAD(config, "elfload").set_cpu(m_maincpu);
 }
