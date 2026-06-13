@@ -2084,9 +2084,14 @@ end
 
 --------------------------------------------------
 -- ZBC semihosting library (C++ host)
+--
+-- Project is named "libzbc" rather than "zbc" to avoid colliding with
+-- the auto-generated project of the same name from src/mame/zbc/ (which
+-- would silently merge the two and apply the emu.h C++ PCH to the
+-- shared C sources here).
 --------------------------------------------------
 
-project "zbc"
+project "libzbc"
 	uuid "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 	kind "StaticLib"
 
